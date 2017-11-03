@@ -431,6 +431,47 @@ class OpenStackImagesShell(object):
                 'key': args.os_key,
                 'ssl_compression': args.ssl_compression
             }
+            ks_session = self._get_keystone_session(**kwargs)
+            token = args.os_auth_token or ks_session.get_token()
+
+            endpoint_type = args.os_endpoint_type or 'public'
+            service_type = args.os_service_type or 'image'
+            endpoint = args.os_image_url or ks_session.get_endpoint(
+                service_type=service_type,
+                interface=endpoint_type,
+                region_name=args.os_region_name)
+
+        return endpoint, token
+
+    def _get_versioned_client(self, api_version, args, force_auth=False):
+        endpoint, token = self._get_endpoint_and_token(args,
+                                                       force_auth=force_auth)
+
+        kwargs = {
+            'token': token,
+            'insecure': args.insecure,
+            'timeout': args.timeout,
+            'cacert': args.os_cacert,
+            'cert': args.os_cert,
+            'key': args.os_key,
+            'ssl_compression': args.ssl_compression
+        }
+        client = glanceclient.Client(api_version, endpoint, **kwargs)
+        return client
+
+    def _cache_schemas(self, options, home_dir='~/.glanceclient'):
+        homedir = expanduser(home_dir)
+        if not os.path.exists(homedir):
+            try:
+                os.makedirs(homedir)
+            except OSError as e:
+                # This avoids glanceclient to crash if it can't write to
+                # ~/.glanceclient, which may happen on some env (for me,
+                # it happens in Jenkins, as Glanceclient can't write to
+                # /var/lib/jenkins).
+                msg = '%s' % e
+                print(encodeutils.safe_decode(msg), file=sys.stderr)
+
         else:
             ks_session = session.Session.load_from_cli_options(args)
             auth_plugin_kwargs = self._get_kwargs_to_create_auth_plugin(args)

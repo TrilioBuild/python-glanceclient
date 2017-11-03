@@ -19,6 +19,7 @@ from glanceclient._i18n import _
 from glanceclient.common import progressbar
 from glanceclient.common import utils
 from glanceclient import exc
+from glanceclient.v2.image_members import MEMBER_STATUS_VALUES
 from glanceclient.v2 import image_members
 from glanceclient.v2 import image_schema
 from glanceclient.v2 import images
@@ -328,6 +329,11 @@ def do_image_upload(gc, args):
            help=_('ID of image(s) to delete.'))
 def do_image_delete(gc, args):
     """Delete specified image."""
+    try:
+        gc.images.delete(args.id)
+    except exc.HTTPNotFound:
+        msg = "No image with an ID of '%s' exists." % args.id
+        utils.exit(msg)
     failure_flag = False
     for args_id in args.id:
         try:

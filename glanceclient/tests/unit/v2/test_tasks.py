@@ -357,6 +357,8 @@ class TestController(testtools.TestCase):
                       'swift://cloud.foo/myaccount/mycontainer/path'},
         }
         task = self.controller.create(**properties)
+        self.assertEqual(task.id, '3a4560a1-e585-443e-9b39-553b46ec92d1')
+        self.assertEqual(task.type, 'import')
         self.assertEqual(_PENDING_ID, task.id)
         self.assertEqual('import', task.type)
 

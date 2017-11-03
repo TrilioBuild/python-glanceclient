@@ -660,6 +660,9 @@ class ShellV2Test(testtools.TestCase):
 
     def test_do_image_delete_deleted(self):
         image_id = 'deleted-img'
+        args = self._make_args({'id': image_id})
+        with mock.patch.object(self.gc.images, 'delete') as mocked_get:
+            mocked_get.side_effect = exc.HTTPNotFound
         args = argparse.Namespace(id=[image_id])
         with mock.patch.object(self.gc.images, 'delete') as mocked_delete:
             mocked_delete.side_effect = exc.HTTPNotFound

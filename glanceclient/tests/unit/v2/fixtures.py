@@ -90,14 +90,23 @@ schema_fixture = {
     "properties": {
         "architecture": {
             "description": "Operating system architecture as specified in "
+<<<<<<< HEAD
+                           "http://docs.openstack.org/trunk/openstack-compute"
+                           "/admin/content/adding-images.html",
+=======
                            "http://docs.openstack.org/user-guide/common"
                            "/cli_manage_images.html",
+>>>>>>> trilio_new
             "is_base": "false",
             "type": "string"
         },
         "checksum": {
+<<<<<<< HEAD
+            "description": "md5 hash of image contents. (READ-ONLY)",
+=======
             "readOnly": True,
             "description": "md5 hash of image contents.",
+>>>>>>> trilio_new
             "maxLength": 32,
             "type": [
                 "null",
@@ -113,8 +122,12 @@ schema_fixture = {
                 "aki",
                 "bare",
                 "ovf",
+<<<<<<< HEAD
+                "ova"
+=======
                 "ova",
                 "docker"
+>>>>>>> trilio_new
             ],
             "type": [
                 "null",
@@ -122,6 +135,14 @@ schema_fixture = {
             ]
         },
         "created_at": {
+<<<<<<< HEAD
+            "description": "Date and time of image registration (READ-ONLY)",
+            "type": "string"
+        },
+        "direct_url": {
+            "description": "URL to access the image file kept in external "
+                           "store (READ-ONLY)",
+=======
             "readOnly": True,
             "description": "Date and time of image registration",
             "type": "string"
@@ -130,6 +151,7 @@ schema_fixture = {
             "readOnly": True,
             "description": "URL to access the image file kept in external "
                            "store",
+>>>>>>> trilio_new
             "type": "string"
         },
         "disk_format": {
@@ -152,8 +174,12 @@ schema_fixture = {
             ]
         },
         "file": {
+<<<<<<< HEAD
+            "description": "(READ-ONLY)",
+=======
             "readOnly": True,
             "description": "An image file url",
+>>>>>>> trilio_new
             "type": "string"
         },
         "id": {
@@ -163,10 +189,14 @@ schema_fixture = {
             "type": "string"
         },
         "instance_uuid": {
+<<<<<<< HEAD
+            "description": "ID of instance used to create this image.",
+=======
             "description": ("Metadata which can be used to record which "
                             "instance this image is associated with. "
                             "(Informational only, does not create an instance "
                             "snapshot.)"),
+>>>>>>> trilio_new
             "is_base": "false",
             "type": "string"
         },
@@ -257,6 +287,17 @@ schema_fixture = {
             ]
         },
         "schema": {
+<<<<<<< HEAD
+            "description": "(READ-ONLY)",
+            "type": "string"
+        },
+        "self": {
+            "description": "(READ-ONLY)",
+            "type": "string"
+        },
+        "size": {
+            "description": "Size of image file in bytes (READ-ONLY)",
+=======
             "readOnly": True,
             "description": "An image schema url",
             "type": "string"
@@ -269,14 +310,19 @@ schema_fixture = {
         "size": {
             "readOnly": True,
             "description": "Size of image file in bytes",
+>>>>>>> trilio_new
             "type": [
                 "null",
                 "integer"
             ]
         },
         "status": {
+<<<<<<< HEAD
+            "description": "Status of the image (READ-ONLY)",
+=======
             "readOnly": True,
             "description": "Status of the image",
+>>>>>>> trilio_new
             "enum": [
                 "queued",
                 "saving",
@@ -296,6 +342,14 @@ schema_fixture = {
             "type": "array"
         },
         "updated_at": {
+<<<<<<< HEAD
+            "description": "Date and time of the last image "
+                           "modification (READ-ONLY)",
+            "type": "string"
+        },
+        "virtual_size": {
+            "description": "Virtual size of image in bytes (READ-ONLY)",
+=======
             "readOnly": True,
             "description": "Date and time of the last image "
                            "modification",
@@ -304,6 +358,7 @@ schema_fixture = {
         "virtual_size": {
             "readOnly": True,
             "description": "Virtual size of image in bytes",
+>>>>>>> trilio_new
             "type": [
                 "null",
                 "integer"
@@ -319,6 +374,8 @@ schema_fixture = {
         }
     }
 }
+<<<<<<< HEAD
+=======
 
 image_versions_fixture = {
     "versions": [
@@ -384,3 +441,4 @@ image_versions_fixture = {
         }
     ]
 }
+>>>>>>> trilio_new

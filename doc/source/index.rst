@@ -63,6 +63,47 @@ See also :doc:`/man/glance`.
 Release Notes
 =============
 
+0.17.3
+------
+
+* Updated from global requirements
+* 1496305_: Don't get the image before deleting it
+* 1481729_: Ship the default image schema in the client
+* 1477910_: V2: Do not validate image schema when listing
+* 1323660_: Expose 'is_base' schema property attribute
+
+.. _1496305: https://bugs.launchpad.net/python-glanceclient/+bug/1496305
+.. _1481729: https://bugs.launchpad.net/python-glanceclient/+bug/1481729
+.. _1477910: https://bugs.launchpad.net/python-glanceclient/+bug/1477910
+.. _1323660: https://bugs.launchpad.net/python-glanceclient/+bug/1323660
+
+0.17.2
+------
+
+* Updated from global requirements
+* 1220809_: Correct help messages for image-update command
+* 1439513_: Creating task with invalid property crashes in py3
+* 1399778_: Omit 'locations' as image-create parameter
+* 1433884_: Fix Metadef Object update issue with python-glanceclient
+* 1446096_: Do not crash on homedir mkdir
+
+.. _1220809: https://launchpad.net/bugs/1220809
+.. _1439513: https://launchpad.net/bugs/1439513
+.. _1399778: https://launchpad.net/bugs/1399778
+.. _1433884: https://launchpad.net/bugs/1433884
+.. _1446096: https://launchpad.net/bugs/1446096
+
+0.17.1
+------
+
+* 1357430_: Add SSL cert verification regression tests
+* 1442664_: Fix client when using no ssl compression
+* 1357430_: Fix client when using no ssl compression
+
+.. _1357430: https://bugs.launchpad.net/python-glanceclient/+bug/1357430
+.. _1442664: https://bugs.launchpad.net/python-glanceclient/+bug/1442664
+.. _1357430: https://bugs.launchpad.net/python-glanceclient/+bug/1357430
+
 1.2.0
 -----
 
