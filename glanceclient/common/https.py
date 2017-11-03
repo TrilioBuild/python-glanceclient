@@ -33,32 +33,27 @@ import six
 # NOTE(jokke): simplified transition to py3, behaves like py2 xrange
 from six.moves import range
 
-from glanceclient.common import utils
-
 try:
     from eventlet import patcher
     # Handle case where we are running in a monkey patched environment
     if patcher.is_monkey_patched('socket'):
         from eventlet.green.httplib import HTTPSConnection
         from eventlet.green.OpenSSL.SSL import GreenConnection as Connection
-        from eventlet.greenio import GreenSocket
-        # TODO(mclaren): A getsockopt workaround: see 'getsockopt' doc string
-        GreenSocket.getsockopt = utils.getsockopt
     else:
         raise ImportError
 except ImportError:
-    try:
-        from httplib import HTTPSConnection
-    except ImportError:
-        from http.client import HTTPSConnection
-    from OpenSSL.SSL import Connection as Connection
+    from OpenSSL import SSL
+    from six.moves import http_client
+    HTTPSConnection = http_client.HTTPSConnection
+    Connection = SSL.Connection
 
 
 from glanceclient import exc
 
 
 def verify_callback(host=None):
-    """
+    """Provide wrapper for do_verify_callback.
+
     We use a partial around the 'real' verify_callback function
     so that we can stash the host value without holding a
     reference on the VerifiedHTTPSConnection.
@@ -72,8 +67,7 @@ def verify_callback(host=None):
 
 def do_verify_callback(connection, x509, errnum,
                        depth, preverify_ok, host=None):
-    """
-    Verify the server's SSL certificate.
+    """Verify the server's SSL certificate.
 
     This is a standalone function rather than a method to avoid
     issues around closing sockets if a reference is held on
@@ -93,7 +87,8 @@ def do_verify_callback(connection, x509, errnum,
 
 
 def host_matches_cert(host, x509):
-    """
+    """Verify the certificate identifies the host.
+
     Verify that the x509 certificate we have received
     from 'host' correctly identifies the server we are
     connecting to, ie that the certificate's Common Name
@@ -141,13 +136,10 @@ def to_bytes(s):
 
 
 class HTTPSAdapter(adapters.HTTPAdapter):
-    """
-    This adapter will be used just when
-    ssl compression should be disabled.
+    """This adapter will be used just when ssl compression should be disabled.
 
-    The init method overwrites the default
-    https pool by setting glanceclient's
-    one.
+    The init method overwrites the default https pool by setting
+    glanceclient's one.
     """
     def __init__(self, *args, **kwargs):
         classes_by_scheme = poolmanager.pool_classes_by_scheme
@@ -158,18 +150,21 @@ class HTTPSAdapter(adapters.HTTPAdapter):
         # NOTE(flaper87): Make sure the url is encoded, otherwise
         # python's standard httplib will fail with a TypeError.
         url = super(HTTPSAdapter, self).request_url(request, proxies)
-        return encodeutils.safe_encode(url)
+        if six.PY2:
+            url = encodeutils.safe_encode(url)
+        return url
 
     def _create_glance_httpsconnectionpool(self, url):
-        kw = self.poolmanager.connection_kw
+        kw = self.poolmanager.connection_pool_kw
         # Parse the url to get the scheme, host, and port
         parsed = compat.urlparse(url)
         # If there is no port specified, we should use the standard HTTPS port
         port = parsed.port or 443
-        pool = HTTPSConnectionPool(parsed.host, port, **kw)
+        host = parsed.netloc.rsplit(':', 1)[0]
+        pool = HTTPSConnectionPool(host, port, **kw)
 
         with self.poolmanager.pools.lock:
-            self.poolmanager.pools[(parsed.scheme, parsed.host, port)] = pool
+            self.poolmanager.pools[(parsed.scheme, host, port)] = pool
 
         return pool
 
@@ -192,9 +187,10 @@ class HTTPSAdapter(adapters.HTTPAdapter):
 
 
 class HTTPSConnectionPool(connectionpool.HTTPSConnectionPool):
-    """
+    """A replacement for the default HTTPSConnectionPool.
+
     HTTPSConnectionPool will be instantiated when a new
-    connection is requested to the HTTPSAdapter.This
+    connection is requested to the HTTPSAdapter. This
     implementation overwrites the _new_conn method and
     returns an instances of glanceclient's VerifiedHTTPSConnection
     which handles no compression.
@@ -217,8 +213,7 @@ class HTTPSConnectionPool(connectionpool.HTTPSConnectionPool):
 
 
 class OpenSSLConnectionDelegator(object):
-    """
-    An OpenSSL.SSL.Connection delegator.
+    """An OpenSSL.SSL.Connection delegator.
 
     Supplies an additional 'makefile' method which httplib requires
     and is not present in OpenSSL.SSL.Connection.
@@ -237,9 +232,8 @@ class OpenSSLConnectionDelegator(object):
 
 
 class VerifiedHTTPSConnection(HTTPSConnection):
-    """
-    Extended HTTPSConnection which uses the OpenSSL library
-    for enhanced SSL support.
+    """Extended OpenSSL HTTPSConnection for enhanced SSL support.
+
     Note: Much of this functionality can eventually be replaced
           with native Python 3.3 code.
     """
@@ -257,7 +251,7 @@ class VerifiedHTTPSConnection(HTTPSConnection):
             excp_lst = (TypeError, FileNotFoundError, ssl.SSLError)
         else:
             # NOTE(jamespage)
-            # Accomodate changes in behaviour for pep-0467, introduced
+            # Accommodate changes in behaviour for pep-0467, introduced
             # in python 2.7.9.
             # https://github.com/python/peps/blob/master/pep-0476.txt
             excp_lst = (TypeError, IOError, ssl.SSLError)
@@ -283,9 +277,7 @@ class VerifiedHTTPSConnection(HTTPSConnection):
             raise exc.SSLConfigurationError(str(e))
 
     def set_context(self):
-        """
-        Set up the OpenSSL context.
-        """
+        """Set up the OpenSSL context."""
         self.context = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
         self.context.set_cipher_list(self.CIPHERS)
 
@@ -331,9 +323,9 @@ class VerifiedHTTPSConnection(HTTPSConnection):
             self.context.set_default_verify_paths()
 
     def connect(self):
-        """
-        Connect to an SSL port using the OpenSSL library and apply
-        per-connection parameters.
+        """Connect to an SSL port using the OpenSSL library.
+
+        This method also applies per-connection parameters to the connection.
         """
         result = socket.getaddrinfo(self.host, self.port, 0,
                                     socket.SOCK_STREAM)

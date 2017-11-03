@@ -32,6 +32,7 @@ import glanceclient.v1.images
 CONTAINER_FORMATS = 'Acceptable formats: ami, ari, aki, bare, and ovf.'
 DISK_FORMATS = ('Acceptable formats: ami, ari, aki, vhd, vmdk, raw, '
                 'qcow2, vdi, and iso.')
+DATA_FIELDS = ('location', 'copy_from', 'file')
 
 _bool_strict = functools.partial(strutils.bool_from_string, strict=True)
 
@@ -40,6 +41,9 @@ _bool_strict = functools.partial(strutils.bool_from_string, strict=True)
            help='Filter images to those that have this name.')
 @utils.arg('--status', metavar='<STATUS>',
            help='Filter images to those that have this status.')
+@utils.arg('--changes-since', metavar='<CHANGES_SINCE>',
+           help='Filter images to those that changed since the given time'
+                ', which will include the deleted images.')
 @utils.arg('--container-format', metavar='<CONTAINER_FORMAT>',
            help='Filter images to those that have this container format. '
                 + CONTAINER_FORMATS)
@@ -80,9 +84,12 @@ _bool_strict = functools.partial(strutils.bool_from_string, strict=True)
 def do_image_list(gc, args):
     """List images you can access."""
     filter_keys = ['name', 'status', 'container_format', 'disk_format',
-                   'size_min', 'size_max', 'is_public']
+                   'size_min', 'size_max', 'is_public', 'changes_since']
     filter_items = [(key, getattr(args, key)) for key in filter_keys]
     filters = dict([item for item in filter_items if item[1] is not None])
+
+    if 'changes_since' in filters:
+        filters['changes-since'] = filters.pop('changes_since')
 
     if args.properties:
         property_filter_items = [p.split('=', 1) for p in args.properties]
@@ -147,8 +154,8 @@ def do_image_show(gc, args):
 
 @utils.arg('--file', metavar='<FILE>',
            help='Local file to save downloaded image data to. '
-                'If this is not specified the image data will be '
-                'written to stdout.')
+                'If this is not specified and there is no redirection '
+                'the image data will not be saved.')
 @utils.arg('image', metavar='<IMAGE>', help='Name or ID of image to download.')
 @utils.arg('--progress', action='store_true', default=False,
            help='Show download progress bar.')
@@ -158,7 +165,12 @@ def do_image_download(gc, args):
     body = image.data()
     if args.progress:
         body = progressbar.VerboseIteratorWrapper(body, len(body))
-    utils.save_image(body, args.file)
+    if not (sys.stdout.isatty() and args.file is None):
+        utils.save_image(body, args.file)
+    else:
+        print('No redirection or local file specified for downloaded image '
+              'data. Please specify a local file with --file to save '
+              'downloaded image or redirect output to another source.')
 
 
 @utils.arg('--id', metavar='<IMAGE_ID>',
@@ -210,6 +222,7 @@ def do_image_download(gc, args):
            help='Print image size in a human-friendly format.')
 @utils.arg('--progress', action='store_true', default=False,
            help='Show upload progress bar.')
+@utils.on_data_require_fields(DATA_FIELDS)
 def do_image_create(gc, args):
     """Create a new image."""
     # Filter out None values
@@ -397,7 +410,7 @@ def do_member_list(gc, args):
 @utils.arg('image', metavar='<IMAGE>',
            help='Image to add member to.')
 @utils.arg('tenant_id', metavar='<TENANT_ID>',
-           help='Tenant to add as member')
+           help='Tenant to add as member.')
 @utils.arg('--can-share', action='store_true', default=False,
            help='Allow the specified tenant to share this image.')
 def do_member_create(gc, args):

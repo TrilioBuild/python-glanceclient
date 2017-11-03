@@ -42,7 +42,11 @@ class ClientTestRequests(testutils.TestCase):
 
     def test_show_bad_image_schema(self):
         # if kernel_id or ramdisk_id are not uuids, verify we
+<<<<<<< HEAD
         # fail schema validation on 'show'
+=======
+        # don't fail due to schema validation
+>>>>>>> trilio_new
         self.requests = self.useFixture(rm_fixture.Fixture())
         self.requests.get('http://example.com/v2/schemas/image',
                           json=schema_fixture)
@@ -50,9 +54,14 @@ class ClientTestRequests(testutils.TestCase):
                           % image_show_fixture['id'],
                           json=image_show_fixture)
         gc = client.Client(2.2, "http://example.com/v2.1")
+<<<<<<< HEAD
         try:
             gc.images.get(image_show_fixture['id'])
             self.fail('Expected exception was not raised.')
         except ValueError as e:
             if 'ramdisk_id' not in str(e) and 'kernel_id' not in str(e):
                 self.fail('Expected exception message was not returned.')
+=======
+        img = gc.images.get(image_show_fixture['id'])
+        self.assertEqual(image_show_fixture['checksum'], img['checksum'])
+>>>>>>> trilio_new

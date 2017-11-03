@@ -44,7 +44,7 @@ from oslo_utils import strutils
 import six
 from six.moves.urllib import parse
 
-from glanceclient.openstack.common._i18n import _
+from glanceclient._i18n import _
 from glanceclient.openstack.common.apiclient import exceptions
 
 
@@ -402,7 +402,7 @@ class CrudManager(BaseManager):
                 'name': self.resource_class.__name__,
                 'args': kwargs
             }
-            raise exceptions.NotFound(404, msg)
+            raise exceptions.NotFound(msg)
         elif num > 1:
             raise exceptions.NoUniqueMatch
         else:
@@ -467,8 +467,7 @@ class Resource(object):
 
     @property
     def human_id(self):
-        """Human-readable ID which can be used for bash completion.
-        """
+        """Human-readable ID which can be used for bash completion."""
         if self.HUMAN_ID:
             name = getattr(self, self.NAME_ATTR, None)
             if name is not None:
@@ -518,8 +517,6 @@ class Resource(object):
         # two resources of different types are not equal
         if not isinstance(other, self.__class__):
             return False
-        if hasattr(self, 'id') and hasattr(other, 'id'):
-            return self.id == other.id
         return self._info == other._info
 
     def is_loaded(self):

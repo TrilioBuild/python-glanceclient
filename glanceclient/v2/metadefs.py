@@ -34,7 +34,8 @@ class NamespaceController(object):
     @utils.memoized_property
     def model(self):
         schema = self.schema_client.get('metadefs/namespace')
-        return warlock.model_factory(schema.raw(), schemas.SchemaBasedModel)
+        return warlock.model_factory(schema.raw(),
+                                     base_class=schemas.SchemaBasedModel)
 
     def create(self, **kwargs):
         """Create a namespace.
@@ -45,7 +46,7 @@ class NamespaceController(object):
         try:
             namespace = self.model(kwargs)
         except (warlock.InvalidOperation, ValueError) as e:
-            raise TypeError(utils.exception_to_str(e))
+            raise TypeError(encodeutils.exception_to_unicode(e))
 
         resp, body = self.http_client.post(url, data=namespace)
         body.pop('self', None)
@@ -62,7 +63,7 @@ class NamespaceController(object):
             try:
                 setattr(namespace, key, value)
             except warlock.InvalidOperation as e:
-                raise TypeError(utils.exception_to_str(e))
+                raise TypeError(encodeutils.exception_to_unicode(e))
 
         # Remove read-only parameters.
         read_only = ['schema', 'updated_at', 'created_at']
@@ -89,7 +90,8 @@ class NamespaceController(object):
         return self.model(**body)
 
     def list(self, **kwargs):
-        """Retrieve a listing of Namespace objects
+        """Retrieve a listing of Namespace objects.
+
         :param page_size: Number of items to request in each paginated request
         :param limit: Use to request a specific page size. Expect a response
                       to a limited request to return between zero and limit
@@ -101,7 +103,8 @@ class NamespaceController(object):
                        in a subsequent limited request.
         :param sort_key: The field to sort on (for example, 'created_at')
         :param sort_dir: The direction to sort ('asc' or 'desc')
-        :returns generator over list of Namespaces
+        :returns: generator over list of Namespaces
+
         """
 
         ori_validate_fun = self.model.validate
@@ -184,14 +187,15 @@ class ResourceTypeController(object):
     @utils.memoized_property
     def model(self):
         schema = self.schema_client.get('metadefs/resource_type')
-        return warlock.model_factory(schema.raw(), schemas.SchemaBasedModel)
+        return warlock.model_factory(schema.raw(),
+                                     base_class=schemas.SchemaBasedModel)
 
     def associate(self, namespace, **kwargs):
         """Associate a resource type with a namespace."""
         try:
             res_type = self.model(kwargs)
         except (warlock.InvalidOperation, ValueError) as e:
-            raise TypeError(utils.exception_to_str(e))
+            raise TypeError(encodeutils.exception_to_unicode(e))
 
         url = '/v2/metadefs/namespaces/{0}/resource_types'.format(namespace,
                                                                   res_type)
@@ -200,15 +204,15 @@ class ResourceTypeController(object):
         return self.model(**body)
 
     def deassociate(self, namespace, resource):
-        """Deasociate a resource type with a namespace."""
+        """Deassociate a resource type with a namespace."""
         url = '/v2/metadefs/namespaces/{0}/resource_types/{1}'. \
             format(namespace, resource)
         self.http_client.delete(url)
 
     def list(self):
-        """Retrieve a listing of available resource types
+        """Retrieve a listing of available resource types.
 
-        :returns generator over list of resource_types
+        :returns: generator over list of resource_types
         """
 
         url = '/v2/metadefs/resource_types'
@@ -232,7 +236,8 @@ class PropertyController(object):
     @utils.memoized_property
     def model(self):
         schema = self.schema_client.get('metadefs/property')
-        return warlock.model_factory(schema.raw(), schemas.SchemaBasedModel)
+        return warlock.model_factory(schema.raw(),
+                                     base_class=schemas.SchemaBasedModel)
 
     def create(self, namespace, **kwargs):
         """Create a property.
@@ -243,7 +248,7 @@ class PropertyController(object):
         try:
             prop = self.model(kwargs)
         except (warlock.InvalidOperation, ValueError) as e:
-            raise TypeError(utils.exception_to_str(e))
+            raise TypeError(encodeutils.exception_to_unicode(e))
 
         url = '/v2/metadefs/namespaces/{0}/properties'.format(namespace)
 
@@ -263,7 +268,7 @@ class PropertyController(object):
             try:
                 setattr(prop, key, value)
             except warlock.InvalidOperation as e:
-                raise TypeError(utils.exception_to_str(e))
+                raise TypeError(encodeutils.exception_to_unicode(e))
 
         url = '/v2/metadefs/namespaces/{0}/properties/{1}'.format(namespace,
                                                                   prop_name)
@@ -280,9 +285,9 @@ class PropertyController(object):
         return self.model(**body)
 
     def list(self, namespace, **kwargs):
-        """Retrieve a listing of metadata properties
+        """Retrieve a listing of metadata properties.
 
-        :returns generator over list of objects
+        :returns: generator over list of objects
         """
         url = '/v2/metadefs/namespaces/{0}/properties'.format(namespace)
 
@@ -312,7 +317,8 @@ class ObjectController(object):
     @utils.memoized_property
     def model(self):
         schema = self.schema_client.get('metadefs/object')
-        return warlock.model_factory(schema.raw(), schemas.SchemaBasedModel)
+        return warlock.model_factory(schema.raw(),
+                                     base_class=schemas.SchemaBasedModel)
 
     def create(self, namespace, **kwargs):
         """Create an object.
@@ -323,7 +329,7 @@ class ObjectController(object):
         try:
             obj = self.model(kwargs)
         except (warlock.InvalidOperation, ValueError) as e:
-            raise TypeError(utils.exception_to_str(e))
+            raise TypeError(encodeutils.exception_to_unicode(e))
 
         url = '/v2/metadefs/namespaces/{0}/objects'.format(namespace)
 
@@ -335,7 +341,7 @@ class ObjectController(object):
         """Update an object.
 
         :param namespace: Name of a namespace the object belongs.
-        :param prop_name: Name of an object (old one).
+        :param object_name: Name of an object (old one).
         :param kwargs: Unpacked object.
         """
         obj = self.get(namespace, object_name)
@@ -343,7 +349,7 @@ class ObjectController(object):
             try:
                 setattr(obj, key, value)
             except warlock.InvalidOperation as e:
-                raise TypeError(utils.exception_to_str(e))
+                raise TypeError(encodeutils.exception_to_unicode(e))
 
         # Remove read-only parameters.
         read_only = ['schema', 'updated_at', 'created_at']
@@ -365,9 +371,9 @@ class ObjectController(object):
         return self.model(**body)
 
     def list(self, namespace, **kwargs):
-        """Retrieve a listing of metadata objects
+        """Retrieve a listing of metadata objects.
 
-        :returns generator over list of objects
+        :returns: generator over list of objects
         """
         url = '/v2/metadefs/namespaces/{0}/objects'.format(namespace,)
         resp, body = self.http_client.get(url)
@@ -384,4 +390,109 @@ class ObjectController(object):
     def delete_all(self, namespace):
         """Delete all objects in a namespace."""
         url = '/v2/metadefs/namespaces/{0}/objects'.format(namespace)
+        self.http_client.delete(url)
+
+
+class TagController(object):
+    def __init__(self, http_client, schema_client):
+        self.http_client = http_client
+        self.schema_client = schema_client
+
+    @utils.memoized_property
+    def model(self):
+        schema = self.schema_client.get('metadefs/tag')
+        return warlock.model_factory(schema.raw(),
+                                     base_class=schemas.SchemaBasedModel)
+
+    def create(self, namespace, tag_name):
+        """Create a tag.
+
+        :param namespace: Name of a namespace the Tag belongs.
+        :param tag_name: The name of the new tag to create.
+        """
+
+        url = ('/v2/metadefs/namespaces/{0}/tags/{1}'.format(namespace,
+                                                             tag_name))
+
+        resp, body = self.http_client.post(url)
+        body.pop('self', None)
+        return self.model(**body)
+
+    def create_multiple(self, namespace, **kwargs):
+        """Create the list of tags.
+
+        :param namespace: Name of a namespace to which the Tags belong.
+        :param kwargs: list of tags.
+        """
+
+        tag_names = kwargs.pop('tags', [])
+        md_tag_list = []
+
+        for tag_name in tag_names:
+            try:
+                md_tag_list.append(self.model(name=tag_name))
+            except (warlock.InvalidOperation) as e:
+                raise TypeError(encodeutils.exception_to_unicode(e))
+        tags = {'tags': md_tag_list}
+
+        url = '/v2/metadefs/namespaces/{0}/tags'.format(namespace)
+
+        resp, body = self.http_client.post(url, data=tags)
+        body.pop('self', None)
+        for tag in body['tags']:
+            yield self.model(tag)
+
+    def update(self, namespace, tag_name, **kwargs):
+        """Update a tag.
+
+        :param namespace: Name of a namespace the Tag belongs.
+        :param tag_name: Name of the Tag (old one).
+        :param kwargs: Unpacked tag.
+        """
+        tag = self.get(namespace, tag_name)
+        for (key, value) in kwargs.items():
+            try:
+                setattr(tag, key, value)
+            except warlock.InvalidOperation as e:
+                raise TypeError(encodeutils.exception_to_unicode(e))
+
+        # Remove read-only parameters.
+        read_only = ['updated_at', 'created_at']
+        for elem in read_only:
+            if elem in tag:
+                del tag[elem]
+
+        url = '/v2/metadefs/namespaces/{0}/tags/{1}'.format(namespace,
+                                                            tag_name)
+        self.http_client.put(url, data=tag)
+
+        return self.get(namespace, tag.name)
+
+    def get(self, namespace, tag_name):
+        url = '/v2/metadefs/namespaces/{0}/tags/{1}'.format(namespace,
+                                                            tag_name)
+        resp, body = self.http_client.get(url)
+        body.pop('self', None)
+        return self.model(**body)
+
+    def list(self, namespace, **kwargs):
+        """Retrieve a listing of metadata tags.
+
+        :returns: generator over list of tags.
+        """
+        url = '/v2/metadefs/namespaces/{0}/tags'.format(namespace)
+        resp, body = self.http_client.get(url)
+
+        for tag in body['tags']:
+            yield self.model(tag)
+
+    def delete(self, namespace, tag_name):
+        """Delete a tag."""
+        url = '/v2/metadefs/namespaces/{0}/tags/{1}'.format(namespace,
+                                                            tag_name)
+        self.http_client.delete(url)
+
+    def delete_all(self, namespace):
+        """Delete all tags in a namespace."""
+        url = '/v2/metadefs/namespaces/{0}/tags'.format(namespace)
         self.http_client.delete(url)

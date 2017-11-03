@@ -16,6 +16,8 @@
 import re
 import sys
 
+import six
+
 
 class BaseException(Exception):
     """An error occurred."""
@@ -155,7 +157,7 @@ def from_response(response, body=None):
     """Return an instance of an HTTPException based on httplib response."""
     cls = _code_map.get(response.status_code, HTTPException)
     if body and 'json' in response.headers['content-type']:
-        # Iterate over the nested objects and retreive the "message" attribute.
+        # Iterate over the nested objects and retrieve the "message" attribute.
         messages = [obj.get('message') for obj in response.json().values()]
         # Join all of the messages together nicely and filter out any objects
         # that don't have a "message" attr.
@@ -177,6 +179,8 @@ def from_response(response, body=None):
         details = ': '.join(details_temp)
         return cls(details=details)
     elif body:
+        if six.PY3:
+            body = body.decode('utf-8')
         details = body.replace('\n\n', '\n')
         return cls(details=details)
 

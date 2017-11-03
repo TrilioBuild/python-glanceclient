@@ -1,5 +1,10 @@
+Python Bindings for the OpenStack Images API
+============================================
+
+This is a client for the OpenStack Images API. There's :doc:`a Python API <ref/index>` (the :mod:`glanceclient` module) and a :doc:`command-line script<man/glance>` (installed as :program:`glance`).
+
 Python API
-==========
+----------
 In order to use the python api directly, you must first obtain an auth token and identify which endpoint you wish to speak to. Once you have done so, you can use the API like so::
 
     >>> from glanceclient import Client
@@ -12,14 +17,33 @@ In order to use the python api directly, you must first obtain an auth token and
     'active'
     >>> image.update(properties=dict(my_custom_property='value'))
     >>> with open('/tmp/copyimage.iso', 'wb') as f:
-            for chunk in image.data:
+            for chunk in image.data():
                 f.write(chunk)
     >>> image.delete()
 
-For an API v2 example see also :doc:`apiv2`.
+Python API Reference
+~~~~~~~~~~~~~~~~~~~~
+.. toctree::
+   :maxdepth: 2
+
+   ref/index
+   ref/v1/index
+   ref/v2/index
+
+.. toctree::
+   :maxdepth: 1
+
+   How to use the v2 API <apiv2>
+
+Command-line Tool Reference
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. toctree::
+   :maxdepth: 1
+
+   man/glance
 
 Command-line Tool
-=================
+-----------------
 In order to use the CLI, you must provide your OpenStack username, password, tenant, and auth endpoint. Use the corresponding configuration options (``--os-username``, ``--os-password``, ``--os-tenant-id``, and ``--os-auth-url``) or set them in environment variables::
 
     export OS_USERNAME=user
@@ -79,6 +103,161 @@ Release Notes
 .. _1357430: https://bugs.launchpad.net/python-glanceclient/+bug/1357430
 .. _1442664: https://bugs.launchpad.net/python-glanceclient/+bug/1442664
 .. _1357430: https://bugs.launchpad.net/python-glanceclient/+bug/1357430
+
+1.2.0
+-----
+
+* This release consists mainly bugfixes since Liberty release.
+* Some functionality has been added, documentation improved.
+* Trivial & typo fixed and requirement changes not included below.
+
+* 1511180_:  Add versions list function
+* 1508356_: Added reactivate/deactivate image using CLI
+* 1510340_: Fix the missing help descripiton of "image-create"
+* 8a4cd79 Add documentation for running the functional tests
+* 5a24705 Update docs to recommend KSA instead of KSC
+* 1507386_: Use clouds.yaml from devstack for functional tests
+* 4fb3092 Add translation to v2 shell
+* b51634a improve readme contents
+* 1480529_: Add support for setting Accept-Language header
+* 1504058_: Use the subcomand parsed args instead of the base
+* afd1810 Stop trying to send image_size to the server
+* 1485407_: Support image deletion in batches in v2
+* 1295356_: print usage when no argument is specified for python3
+* df0f664 Do not use openstack.common.i18n in glance client
+* 1f2fefb Use common identity parameters fro keystone client
+* 1499540_: No auth when token and endpoint are passed
+* 557acb1 Use dictionary literal for dictionary creation
+* c6addc7 Replace exception_to_str with oslo.utils function
+* 1496305_: Don't get the image before deleting it
+* 1495632_: Fix human readable when size is None
+* 1489727_: Add parsing the endpoint URL
+* 1467719_: Add check Identity validate when get schemas
+
+.. _1511180: https://bugs.launchpad.net/python-glanceclient/+bug/1511180
+.. _1508356: https://bugs.launchpad.net/python-glanceclient/+bug/1508356
+.. _1510340: https://bugs.launchpad.net/python-glanceclient/+bug/1510340
+.. _1507386: https://bugs.launchpad.net/python-neutronclient/+bug/1507386
+.. _1480529: https://bugs.launchpad.net/python-glanceclient/+bug/1480529
+.. _1504058: https://bugs.launchpad.net/python-glanceclient/+bug/1504058
+.. _1485407: https://bugs.launchpad.net/python-glanceclient/+bug/1485407
+.. _1295356: https://bugs.launchpad.net/python-novaclient/+bug/1295356
+.. _1499540: https://bugs.launchpad.net/python-glanceclient/+bug/1499540
+.. _1496305: https://bugs.launchpad.net/python-glanceclient/+bug/1496305
+.. _1495632: https://bugs.launchpad.net/python-glanceclient/+bug/1495632
+.. _1489727: https://bugs.launchpad.net/python-glanceclient/+bug/1489727
+.. _1467719: https://bugs.launchpad.net/glance/+bug/1467719
+
+1.1.0
+-----
+
+* This release provides mainly bugfixes for the bugs discovered after defaulting to v2 API on CLI. If you're using 1.0.0 client, it is highly recommended to upgrade.
+
+* 1494259_: Fixes CLI client called without subcommands
+* 1488914_: Print the reverting back to v1 to stderr
+* 1487645_: Invalid output running the command 'glance image-show <image_id>'
+* 1490457_: Don't make `help` require auth parameters
+* 1491311_: check for None value in utils.safe_header
+* f0b30f4 Updated from global requirements
+* 1490462_: Consider `--os-token` when using v2
+* 1489381_: Check if v2 is available and fallback
+* 1491646_: Update path to subunit2html in post_test_hook
+* 1488892_: Password should be prompted once
+
+.. _1494259: https://bugs.launchpad.net/python-glanceclient/+bug/1494259
+.. _1488914: https://bugs.launchpad.net/python-glanceclient/+bug/1488914
+.. _1487645: https://bugs.launchpad.net/python-glanceclient/+bug/1487645
+.. _1490457: https://bugs.launchpad.net/python-glanceclient/+bug/1490457
+.. _1491311: https://bugs.launchpad.net/python-glanceclient/+bug/1491311
+.. _1490462: https://bugs.launchpad.net/python-glanceclient/+bug/1490462
+.. _1489381: https://bugs.launchpad.net/python-glanceclient/+bug/1489381
+.. _1491646: https://bugs.launchpad.net/python-glanceclient/+bug/1491646
+.. _1488892: https://bugs.launchpad.net/python-glanceclient/+bug/1488892
+
+1.0.0
+-----
+
+* This major release of python-glanceclient defaults to using the Images v2 API for the Command Line Interface. This is consistent with the current situation in the Glance project, where the Images v1 API is 'SUPPORTED' and the Images v2 API is 'CURRENT'. Further, it makes the CLI consistent with the client API, which has used the Images v2 API as the default since the Kilo release.
+
+A lot of effort has been invested to make the transition as smooth as possible, but we acknowledge that CLI users will encounter backwards incompatibility.
+
+* remcustssl_: Remove custom SSL compression handling
+* 14be607 Add more information show in v2
+* 1309272_: Require disk and container format on image-create
+* 1481729_: Ship the default image schema in the client
+* 181131e Use API v2 as default
+* 1477910_: V2: Do not validate image schema when listing
+* 9284eb4 Updated from global requirements
+* 1475769_: Add unicode support for properties values in v2 shell
+* 1479020_: Fix failure to create glance https connection pool
+* ec0f2df Enable flake8 checks
+* 1433637_: Extend unittests coverage for v2 tasks module
+* metatags_: Support for Metadata Definition Catalog for Tags
+* b48ff98 Fix exception message in Http.py
+* 1472234_: Fix an issue with broken test on ci
+* 1473454_: Remove usage of assert_called_once on Mock objects
+* 9fdd4f1 Add .eggs/* to .gitignore
+* 0f9aa99 Updated from global requirements
+* 1468485_: Account for dictionary order in test_shell.py
+* bp-oslo-ns_: Do not fall back to namespaced oslo.i18n
+* b10e893 Updated from global requirements
+* 1465373_: Add v2 support for the marker attribute
+* 997c12d Import only modules and update tox.ini
+* 0810805 Updated from global requirements
+* 1461678_: Close iterables at the end of iteration
+* bp-session_: Make glanceclient accept a session object
+* 5e85d61 cleanup openstack-common.conf and sync updated files
+* 1432701_: Add parameter 'changes-since' for image-list of v1
+
+.. _remcustssl: https://review.openstack.org/#/c/187674
+.. _1309272: https://bugs.launchpad.net/python-glanceclient/+bug/1309272
+.. _1481729: https://bugs.launchpad.net/python-glanceclient/+bug/1481729
+.. _1477910: https://bugs.launchpad.net/python-glanceclient/+bug/1477910
+.. _1475769: https://bugs.launchpad.net/python-glanceclient/+bug/1475769
+.. _1479020: https://bugs.launchpad.net/python-glanceclient/+bug/1479020
+.. _1433637: https://bugs.launchpad.net/python-glanceclient/+bug/1433637
+.. _metatags: https://review.openstack.org/#/c/179674/
+.. _1472234: https://bugs.launchpad.net/python-glanceclient/+bug/1472234
+.. _1473454: https://bugs.launchpad.net/python-cinderclient/+bug/1473454
+.. _1468485: https://bugs.launchpad.net/python-glanceclient/+bug/1468485
+.. _bp-oslo-ns: https://blueprints.launchpad.net/oslo-incubator/+spec/remove-namespace-packages
+.. _1465373: https://bugs.launchpad.net/python-glanceclient/+bug/1465373
+.. _1461678: https://bugs.launchpad.net/nova/+bug/1461678
+.. _bp-session: https://blueprints.launchpad.net/python-glanceclient/+spec/session-objects
+.. _1432701: https://bugs.launchpad.net/glance/+bug/1432701
+
+0.19.0
+------
+
+* 1381514_: Include ``owner`` in v2 image list
+* 1433884_: Fix ``md-object-update`` issue
+* 1446096_: Stop crashing if ``$HOME`` is not writable
+* 1402632_: Improve import related error handling
+
+.. _1381514: https://bugs.launchpad.net/python-glanceclient/+bug/1381514
+.. _1433884: https://bugs.launchpad.net/python-glanceclient/+bug/1433884
+.. _1455102: https://bugs.launchpad.net/python-glanceclient/+bug/1455102
+.. _1446096: https://bugs.launchpad.net/python-glanceclient/+bug/1446096
+.. _1402632: https://bugs.launchpad.net/python-glanceclient/+bug/1402632
+
+0.18.0
+------
+
+* 1442664_, 1442883_, 1357430_: Fix errors when SSL compression is disabled
+* 1399778_: Remove ``locations`` from image-create arguments
+* 1439513_: Fix error on python 3 when creating a task with and invalid property
+* Stop accepting ``*args`` in the main client interface
+* Expose ``is_base`` schema property attribute, allowing the client to differentiate between base and custom image properties
+* 1433962_: Validate whether a tag is valid when filtering for images. Invalid tags now raise an error rather than being ignored
+* 1434381_: Add ``--human-readable`` option to ``image-show``
+
+.. _1442664: https://bugs.launchpad.net/python-glanceclient/+bug/1442664
+.. _1442883: https://bugs.launchpad.net/python-glanceclient/+bug/1442883
+.. _1357430: https://bugs.launchpad.net/python-glanceclient/+bug/1357430
+.. _1399778: https://bugs.launchpad.net/python-glanceclient/+bug/1399778
+.. _1439513: https://bugs.launchpad.net/python-glanceclient/+bug/1439513
+.. _1433962: https://bugs.launchpad.net/python-glanceclient/+bug/1433962
+.. _1434381: https://bugs.launchpad.net/python-glanceclient/+bug/1434381
 
 0.17.0
 ------

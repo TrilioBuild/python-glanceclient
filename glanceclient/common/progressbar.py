@@ -19,9 +19,10 @@ import six
 
 
 class _ProgressBarBase(object):
-    """
-    Base abstract class used by specific class wrapper to show a progress bar
-    when the wrapped object are consumed.
+    """A progress bar provider for a wrapped obect.
+
+    Base abstract class used by specific class wrapper to show
+    a progress bar when the wrapped object are consumed.
 
     :param wrapped: Object to wrap that hold data to be consumed.
     :param totalsize: The total size of the data in the wrapped object.
@@ -50,9 +51,10 @@ class _ProgressBarBase(object):
 
 
 class VerboseFileWrapper(_ProgressBarBase):
-    """
-    A file wrapper that show and advance a progress bar whenever file's read
-    method is called.
+    """A file wrapper with a progress bar.
+
+    The file wrapper shows and advances a progress bar whenever the
+    wrapped file's read method is called.
     """
 
     def read(self, *args, **kwargs):
@@ -68,9 +70,10 @@ class VerboseFileWrapper(_ProgressBarBase):
 
 
 class VerboseIteratorWrapper(_ProgressBarBase):
-    """
-    An iterator wrapper that show and advance a progress bar whenever
-    data is consumed from the iterator.
+    """An iterator wrapper with a progress bar.
+
+    The iterator wrapper shows and advances a progress bar whenever the
+    wrapped data is consumed from the iterator.
 
     :note: Use only with iterator that yield strings.
     """
