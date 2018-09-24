@@ -13,7 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import json
+import os
 import sys
+
+from oslo_utils import strutils
 
 from glanceclient._i18n import _
 from glanceclient.common import progressbar
@@ -25,12 +29,10 @@ from glanceclient.v2 import images
 from glanceclient.v2 import namespace_schema
 from glanceclient.v2 import resource_type_schema
 from glanceclient.v2 import tasks
-import json
-import os
 
 MEMBER_STATUS_VALUES = image_members.MEMBER_STATUS_VALUES
 IMAGE_SCHEMA = None
-DATA_FIELDS = ('location', 'copy_from', 'file')
+DATA_FIELDS = ('location', 'copy_from', 'file', 'uri')
 
 
 def get_image_schema():
@@ -49,7 +51,17 @@ def get_image_schema():
 @utils.schema_args(get_image_schema, omit=['created_at', 'updated_at', 'file',
                                            'checksum', 'virtual_size', 'size',
                                            'status', 'schema', 'direct_url',
-                                           'locations', 'self'])
+                                           'locations', 'self', 'os_hidden',
+                                           'os_hash_value', 'os_hash_algo'])
+# NOTE(rosmaita): to make this option more intuitive for end users, we
+# do not use the Glance image property name 'os_hidden' here.  This means
+# we must include 'os_hidden' in the 'omit' list above and handle the
+# --hidden argument by hand
+@utils.arg('--hidden', type=strutils.bool_from_string, metavar='[True|False]',
+           default=None,
+           dest='os_hidden',
+           help=("If true, image will not appear in default image list "
+                 "response."))
 @utils.arg('--property', metavar="<key=value>", action='append',
            default=[], help=_('Arbitrary property to associate with image.'
                               ' May be used multiple times.'))
@@ -59,11 +71,15 @@ def get_image_schema():
                   'passed to the client via stdin.'))
 @utils.arg('--progress', action='store_true', default=False,
            help=_('Show upload progress bar.'))
+@utils.arg('--backend', metavar='<STORE>',
+           default=utils.env('OS_IMAGE_BACKEND', default=None),
+           help='Backend store to upload image to.')
 @utils.on_data_require_fields(DATA_FIELDS)
 def do_image_create(gc, args):
     """Create a new image."""
     schema = gc.schemas.get("image")
     _args = [(x[0].replace('-', '_'), x[1]) for x in vars(args).items()]
+
     fields = dict(filter(lambda x: x[1] is not None and
                          (x[0] == 'property' or
                           schema.is_core_property(x[0])),
@@ -74,13 +90,25 @@ def do_image_create(gc, args):
         key, value = datum.split('=', 1)
         fields[key] = value
 
+    backend = args.backend
+
     file_name = fields.pop('file', None)
+    using_stdin = not sys.stdin.isatty()
+    if args.backend and not (file_name or using_stdin):
+        utils.exit("--backend option should only be provided with --file "
+                   "option or stdin.")
+
+    if backend:
+        # determine if backend is valid
+        _validate_backend(backend, gc)
+
     if file_name is not None and os.access(file_name, os.R_OK) is False:
         utils.exit("File %s does not exist or user does not have read "
                    "privileges to it" % file_name)
     image = gc.images.create(**fields)
     try:
         if utils.get_data_file(args) is not None:
+            backend = fields.get('backend', None)
             args.id = image['id']
             args.size = None
             do_image_upload(gc, args)
@@ -92,7 +120,14 @@ def do_image_create(gc, args):
 @utils.schema_args(get_image_schema, omit=['created_at', 'updated_at', 'file',
                                            'checksum', 'virtual_size', 'size',
                                            'status', 'schema', 'direct_url',
-                                           'locations', 'self'])
+                                           'locations', 'self', 'os_hidden',
+                                           'os_hash_value', 'os_hash_algo'])
+# NOTE: --hidden requires special handling; see note at do_image_create
+@utils.arg('--hidden', type=strutils.bool_from_string, metavar='[True|False]',
+           default=None,
+           dest='os_hidden',
+           help=("If true, image will not appear in default image list "
+                 "response."))
 @utils.arg('--property', metavar="<key=value>", action='append',
            default=[], help=_('Arbitrary property to associate with image.'
                               ' May be used multiple times.'))
@@ -102,14 +137,40 @@ def do_image_create(gc, args):
                   'passed to the client via stdin.'))
 @utils.arg('--progress', action='store_true', default=False,
            help=_('Show upload progress bar.'))
-@utils.arg('--import-method', metavar='<METHOD>', default='glance-direct',
+@utils.arg('--import-method', metavar='<METHOD>',
+           default=utils.env('OS_IMAGE_IMPORT_METHOD', default=None),
            help=_('Import method used for Image Import workflow. '
-                  'Valid values can be retrieved with import-info command.'))
+                  'Valid values can be retrieved with import-info command. '
+                  'Defaults to env[OS_IMAGE_IMPORT_METHOD] or if that is '
+                  'undefined uses \'glance-direct\' if data is provided using '
+                  '--file or stdin. Otherwise, simply creates an image '
+                  'record if no import-method and no data is supplied'))
+@utils.arg('--uri', metavar='<IMAGE_URL>', default=None,
+           help=_('URI to download the external image.'))
+@utils.arg('--backend', metavar='<STORE>',
+           default=utils.env('OS_IMAGE_BACKEND', default=None),
+           help='Backend store to upload image to.')
 @utils.on_data_require_fields(DATA_FIELDS)
 def do_image_create_via_import(gc, args):
-    """EXPERIMENTAL: Create a new image via image import."""
+    """EXPERIMENTAL: Create a new image via image import.
+
+    Use the interoperable image import workflow to create an image.  This
+    command is designed to be backward compatible with the current image-create
+    command, so its behavior is as follows:
+
+    * If an import-method is specified (either on the command line or through
+      the OS_IMAGE_IMPORT_METHOD environment variable, then you must provide a
+      data source appropriate to that method (for example, --file for
+      glance-direct, or --uri for web-download).
+    * If no import-method is specified AND you provide either a --file or
+      data to stdin, the command will assume you are using the 'glance-direct'
+      import-method and will act accordingly.
+    * If no import-method is specified and no data is supplied via --file or
+      stdin, the command will simply create an image record in 'queued' status.
+    """
     schema = gc.schemas.get("image")
     _args = [(x[0].replace('-', '_'), x[1]) for x in vars(args).items()]
+
     fields = dict(filter(lambda x: x[1] is not None and
                          (x[0] == 'property' or
                           schema.is_core_property(x[0])),
@@ -121,25 +182,94 @@ def do_image_create_via_import(gc, args):
         fields[key] = value
 
     file_name = fields.pop('file', None)
-    if file_name is not None and os.access(file_name, os.R_OK) is False:
-        utils.exit("File %s does not exist or user does not have read "
-                   "privileges to it" % file_name)
+    using_stdin = not sys.stdin.isatty()
+
+    # special processing for backward compatibility with image-create
+    if args.import_method is None and (file_name or using_stdin):
+        args.import_method = 'glance-direct'
+
+    # determine whether the requested import method is valid
     import_methods = gc.images.get_import_info().get('import-methods')
-    if file_name and (not import_methods or
-                      'glance-direct' not in import_methods.get('value')):
-        utils.exit("No suitable import method available for direct upload, "
-                   "please use image-create instead.")
+    if args.import_method and args.import_method not in import_methods.get(
+            'value'):
+        utils.exit("Import method '%s' is not valid for this cloud. "
+                   "Valid values can be retrieved with import-info command." %
+                   args.import_method)
+
+    # determine if backend is valid
+    backend = None
+    if args.backend:
+        backend = args.backend
+        _validate_backend(backend, gc)
+
+    # make sure we have all and only correct inputs for the requested method
+    if args.import_method is None:
+        if args.uri:
+            utils.exit("You cannot use --uri without specifying an import "
+                       "method.")
+    if args.import_method == 'glance-direct':
+        if backend and not (file_name or using_stdin):
+            utils.exit("--backend option should only be provided with --file "
+                       "option or stdin for the glance-direct import method.")
+        if args.uri:
+            utils.exit("You cannot specify a --uri with the glance-direct "
+                       "import method.")
+        if file_name is not None and os.access(file_name, os.R_OK) is False:
+            utils.exit("File %s does not exist or user does not have read "
+                       "privileges to it." % file_name)
+        if file_name is not None and using_stdin:
+            utils.exit("You cannot use both --file and stdin with the "
+                       "glance-direct import method.")
+        if not file_name and not using_stdin:
+            utils.exit("You must specify a --file or provide data via stdin "
+                       "for the glance-direct import method.")
+    if args.import_method == 'web-download':
+        if backend and not args.uri:
+            utils.exit("--backend option should only be provided with --uri "
+                       "option for the web-download import method.")
+        if not args.uri:
+            utils.exit("URI is required for web-download import method. "
+                       "Please use '--uri <uri>'.")
+        if file_name:
+            utils.exit("You cannot specify a --file with the web-download "
+                       "import method.")
+        if using_stdin:
+            utils.exit("You cannot pass data via stdin with the web-download "
+                       "import method.")
+
+    # process
     image = gc.images.create(**fields)
     try:
-        if utils.get_data_file(args) is not None:
-            args.id = image['id']
-            args.size = None
-            do_image_stage(gc, args)
+        args.id = image['id']
+        if args.import_method:
+            if utils.get_data_file(args) is not None:
+                args.size = None
+                do_image_stage(gc, args)
             args.from_create = True
             do_image_import(gc, args)
-            image = gc.images.get(args.id)
+        image = gc.images.get(args.id)
     finally:
         utils.print_image(image)
+
+
+def _validate_backend(backend, gc):
+    try:
+        enabled_backends = gc.images.get_stores_info().get('stores')
+    except exc.HTTPNotFound:
+        # NOTE(abhishekk): To maintain backward compatibility
+        return
+
+    if backend:
+        valid_backend = False
+        for available_backend in enabled_backends:
+            if available_backend['id'] == backend:
+                valid_backend = True
+                break
+
+        if not valid_backend:
+            utils.exit("Backend '%s' is not valid for this cloud. Valid "
+                       "values can be retrieved with stores-info command." %
+                       backend)
 
 
 @utils.arg('id', metavar='<IMAGE_ID>', help=_('ID of image to update.'))
@@ -147,7 +277,14 @@ def do_image_create_via_import(gc, args):
                                            'updated_at', 'file', 'checksum',
                                            'virtual_size', 'size', 'status',
                                            'schema', 'direct_url', 'tags',
-                                           'self'])
+                                           'self', 'os_hidden',
+                                           'os_hash_value', 'os_hash_algo'])
+# NOTE: --hidden requires special handling; see note at do_image_create
+@utils.arg('--hidden', type=strutils.bool_from_string, metavar='[True|False]',
+           default=None,
+           dest='os_hidden',
+           help=("If true, image will not appear in default image list "
+                 "response."))
 @utils.arg('--property', metavar="<key=value>", action='append',
            default=[], help=_('Arbitrary property to associate with image.'
                               ' May be used multiple times.'))
@@ -157,6 +294,7 @@ def do_image_update(gc, args):
     """Update an existing image."""
     schema = gc.schemas.get("image")
     _args = [(x[0].replace('-', '_'), x[1]) for x in vars(args).items()]
+
     fields = dict(filter(lambda x: x[1] is not None and
                          (x[0] in ['property', 'remove_property'] or
                           schema.is_core_property(x[0])),
@@ -188,7 +326,7 @@ def do_image_update(gc, args):
            help=_("Filter images by a user-defined image property."),
            action='append', dest='properties', default=[])
 @utils.arg('--checksum', metavar='<CHECKSUM>',
-           help=_('Displays images that match the checksum.'))
+           help=_('Displays images that match the MD5 checksum.'))
 @utils.arg('--tag', metavar='<TAG>', action='append',
            help=_("Filter images by a user-defined tag."))
 @utils.arg('--sort-key', default=[], action='append',
@@ -202,10 +340,20 @@ def do_image_update(gc, args):
            help=(_("Comma-separated list of sort keys and directions in the "
                    "form of <key>[:<asc|desc>]. Valid keys: %s. OPTIONAL."
                    ) % ', '.join(images.SORT_KEY_VALUES)))
+@utils.arg('--hidden',
+           dest='os_hidden',
+           metavar='[True|False]',
+           default=None,
+           type=strutils.bool_from_string,
+           const=True,
+           nargs='?',
+           help="Filters results by hidden status. Default=None.")
 def do_image_list(gc, args):
     """List images you can access."""
-    filter_keys = ['visibility', 'member_status', 'owner', 'checksum', 'tag']
+    filter_keys = ['visibility', 'member_status', 'owner', 'checksum', 'tag',
+                   'os_hidden']
     filter_items = [(key, getattr(args, key)) for key in filter_keys]
+
     if args.properties:
         filter_properties = [prop.split('=', 1) for prop in args.properties]
         if any(len(pair) != 2 for pair in filter_properties):
@@ -332,6 +480,27 @@ def do_import_info(gc, args):
         utils.print_dict(import_info)
 
 
+def do_stores_info(gc, args):
+    """Print available backends from Glance."""
+    try:
+        stores_info = gc.images.get_stores_info()
+    except exc.HTTPNotFound:
+        utils.exit('Multi Backend support is not enabled')
+    else:
+        utils.print_dict(stores_info)
+
+
+@utils.arg('--allow-md5-fallback', action='store_true',
+           default=utils.env('OS_IMAGE_ALLOW_MD5_FALLBACK', default=False),
+           help=_('If os_hash_algo and os_hash_value properties are available '
+                  'on the image, they will be used to validate the downloaded '
+                  'image data. If the indicated secure hash algorithm is not '
+                  'available on the client, the download will fail. Use this '
+                  'flag to indicate that in such a case the legacy MD5 image '
+                  'checksum should be used to validate the downloaded data. '
+                  'You can also set the enviroment variable '
+                  'OS_IMAGE_ALLOW_MD5_FALLBACK to any value to activate this '
+                  'option.'))
 @utils.arg('--file', metavar='<FILE>',
            help=_('Local file to save downloaded image data to. '
                   'If this is not specified and there is no redirection '
@@ -348,12 +517,13 @@ def do_image_download(gc, args):
         utils.exit(msg)
 
     try:
-        body = gc.images.data(args.id)
+        body = gc.images.data(args.id,
+                              allow_md5_fallback=args.allow_md5_fallback)
     except (exc.HTTPForbidden, exc.HTTPException) as e:
         msg = "Unable to download image '%s'. (%s)" % (args.id, e)
         utils.exit(msg)
 
-    if body is None:
+    if body.wrapped is None:
         msg = ('Image %s has no data.' % args.id)
         utils.exit(msg)
 
@@ -376,8 +546,17 @@ def do_image_download(gc, args):
            help=_('Show upload progress bar.'))
 @utils.arg('id', metavar='<IMAGE_ID>',
            help=_('ID of image to upload data to.'))
+@utils.arg('--backend', metavar='<STORE>',
+           default=utils.env('OS_IMAGE_BACKEND', default=None),
+           help='Backend store to upload image to.')
 def do_image_upload(gc, args):
     """Upload data for a specific image."""
+    backend = None
+    if args.backend:
+        backend = args.backend
+        # determine if backend is valid
+        _validate_backend(backend, gc)
+
     image_data = utils.get_data_file(args)
     if args.progress:
         filesize = utils.get_file_size(image_data)
@@ -385,7 +564,7 @@ def do_image_upload(gc, args):
             # NOTE(kragniz): do not show a progress bar if the size of the
             # input is unknown (most likely a piped input)
             image_data = progressbar.VerboseFileWrapper(image_data, filesize)
-    gc.images.upload(args.id, image_data, args.size)
+    gc.images.upload(args.id, image_data, args.size, backend=backend)
 
 
 @utils.arg('--file', metavar='<FILE>',
@@ -418,18 +597,69 @@ def do_image_stage(gc, args):
                   'Valid values can be retrieved with import-info command '
                   'and the default "glance-direct" is used with '
                   '"image-stage".'))
+@utils.arg('--uri', metavar='<IMAGE_URL>', default=None,
+           help=_('URI to download the external image.'))
 @utils.arg('id', metavar='<IMAGE_ID>',
            help=_('ID of image to import.'))
+@utils.arg('--backend', metavar='<STORE>',
+           default=utils.env('OS_IMAGE_BACKEND', default=None),
+           help='Backend store to upload image to.')
 def do_image_import(gc, args):
     """Initiate the image import taskflow."""
+    backend = None
+    if args.backend:
+        backend = args.backend
+        # determine if backend is valid
+        _validate_backend(backend, gc)
+
+    if getattr(args, 'from_create', False):
+        # this command is being called "internally" so we can skip
+        # validation -- just do the import and get out of here
+        gc.images.image_import(args.id, args.import_method, args.uri,
+                               backend=backend)
+        return
+
+    # do input validation
     try:
-        gc.images.image_import(args.id, args.import_method)
+        import_methods = gc.images.get_import_info().get('import-methods')
     except exc.HTTPNotFound:
         utils.exit('Target Glance does not support Image Import workflow')
-    else:
-        if not getattr(args, 'from_create', False):
-            image = gc.images.get(args.id)
-            utils.print_image(image)
+
+    if args.import_method not in import_methods.get('value'):
+        utils.exit("Import method '%s' is not valid for this cloud. "
+                   "Valid values can be retrieved with import-info command." %
+                   args.import_method)
+
+    if args.import_method == 'web-download' and not args.uri:
+        utils.exit("Provide URI for web-download import method.")
+    if args.uri and args.import_method != 'web-download':
+        utils.exit("Import method should be 'web-download' if URI is "
+                   "provided.")
+
+    # check image properties
+    image = gc.images.get(args.id)
+    container_format = image.get('container_format')
+    disk_format = image.get('disk_format')
+    if not (container_format and disk_format):
+        utils.exit("The 'container_format' and 'disk_format' properties "
+                   "must be set on an image before it can be imported.")
+
+    image_status = image.get('status')
+    if args.import_method == 'glance-direct':
+        if image_status != 'uploading':
+            utils.exit("The 'glance-direct' import method can only be applied "
+                       "to an image in status 'uploading'")
+    if args.import_method == 'web-download':
+        if image_status != 'queued':
+            utils.exit("The 'web-download' import method can only be applied "
+                       "to an image in status 'queued'")
+
+    # finally, do the import
+    gc.images.image_import(args.id, args.import_method, args.uri,
+                           backend=backend)
+
+    image = gc.images.get(args.id)
+    utils.print_image(image)
 
 
 @utils.arg('id', metavar='<IMAGE_ID>', nargs='+',

@@ -48,14 +48,17 @@ class ClientTestBase(base.ClientTestBase):
 
     def _get_clients(self):
         self.creds = credentials().get_auth_args()
+        venv_name = os.environ.get('OS_TESTENV_NAME', 'functional')
         cli_dir = os.environ.get(
             'OS_GLANCECLIENT_EXEC_DIR',
-            os.path.join(os.path.abspath('.'), '.tox/functional/bin'))
+            os.path.join(os.path.abspath('.'), '.tox/%s/bin' % venv_name))
 
         return base.CLIClient(
             username=self.creds['username'],
             password=self.creds['password'],
             tenant_name=self.creds['project_name'],
+            user_domain_id=self.creds['user_domain_id'],
+            project_domain_id=self.creds['project_domain_id'],
             uri=self.creds['auth_url'],
             cli_dir=cli_dir)
 
@@ -68,7 +71,9 @@ class ClientTestBase(base.ClientTestBase):
             auth_url=self.creds["auth_url"],
             username=self.creds["username"],
             password=self.creds["password"],
-            project_name=self.creds["project_name"])
+            project_name=self.creds["project_name"],
+            user_domain_id=self.creds["user_domain_id"],
+            project_domain_id=self.creds["project_domain_id"])
         keystoneclient = self.Keystone(**ks_creds)
         return self.Glance(keystoneclient)
 

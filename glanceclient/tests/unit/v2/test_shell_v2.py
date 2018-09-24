@@ -14,10 +14,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 import argparse
+from copy import deepcopy
 import json
 import mock
 import os
 import six
+import sys
 import tempfile
 import testtools
 
@@ -93,6 +95,7 @@ class ShellV2Test(testtools.TestCase):
         # dict directly, it throws an AttributeError.
         class Args(object):
             def __init__(self, entries):
+                self.backend = None
                 self.__dict__.update(entries)
 
         return Args(args)
@@ -120,6 +123,56 @@ class ShellV2Test(testtools.TestCase):
 
     def _run_command(self, cmd):
         self.shell.main(cmd.split())
+
+    stores_info_response = {
+        "stores": [
+            {
+                "default": "true",
+                "id": "ceph1",
+                "description": "RBD backend for glance."
+            },
+            {
+                "id": "file2",
+                "description": "Filesystem backend for glance."
+            },
+            {
+                "id": "file1",
+                "description": "Filesystem backend for gkance."
+            },
+            {
+                "id": "ceph2",
+                "description": "RBD backend for glance."
+            }
+        ]
+    }
+
+    def test_do_stores_info(self):
+        args = []
+        with mock.patch.object(self.gc.images,
+                               'get_stores_info') as mocked_list:
+            mocked_list.return_value = self.stores_info_response
+
+            test_shell.do_stores_info(self.gc, args)
+
+            mocked_list.assert_called_once_with()
+            utils.print_dict.assert_called_once_with(self.stores_info_response)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_stores_info(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('Multi Backend support is not enabled')
+        args = []
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_stores_info') as mocked_info:
+            mocked_info.side_effect = exc.HTTPNotFound
+            try:
+                test_shell.do_stores_info(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
 
     @mock.patch('sys.stderr')
     def test_image_create_missing_disk_format(self, __):
@@ -157,6 +210,46 @@ class ShellV2Test(testtools.TestCase):
         self.assertEqual('error: Must provide --disk-format when using stdin.',
                          e.message)
 
+    @mock.patch('sys.stderr')
+    def test_create_via_import_glance_direct_missing_disk_format(self, __):
+        e = self.assertRaises(exc.CommandError, self._run_command,
+                              '--os-image-api-version 2 '
+                              'image-create-via-import '
+                              '--file fake_src --container-format bare')
+        self.assertEqual('error: Must provide --disk-format when using '
+                         '--file.', e.message)
+
+    @mock.patch('sys.stderr')
+    def test_create_via_import_glance_direct_missing_container_format(
+            self, __):
+        e = self.assertRaises(exc.CommandError, self._run_command,
+                              '--os-image-api-version 2 '
+                              'image-create-via-import '
+                              '--file fake_src --disk-format qcow2')
+        self.assertEqual('error: Must provide --container-format when '
+                         'using --file.', e.message)
+
+    @mock.patch('sys.stderr')
+    def test_create_via_import_web_download_missing_disk_format(self, __):
+        e = self.assertRaises(exc.CommandError, self._run_command,
+                              '--os-image-api-version 2 '
+                              'image-create-via-import ' +
+                              '--import-method web-download ' +
+                              '--uri fake_uri --container-format bare')
+        self.assertEqual('error: Must provide --disk-format when using '
+                         '--uri.', e.message)
+
+    @mock.patch('sys.stderr')
+    def test_create_via_import_web_download_missing_container_format(
+            self, __):
+        e = self.assertRaises(exc.CommandError, self._run_command,
+                              '--os-image-api-version 2 '
+                              'image-create-via-import '
+                              '--import-method web-download '
+                              '--uri fake_uri --disk-format qcow2')
+        self.assertEqual('error: Must provide --container-format when '
+                         'using --uri.', e.message)
+
     def test_do_image_list(self):
         input = {
             'limit': None,
@@ -170,7 +263,8 @@ class ShellV2Test(testtools.TestCase):
             'sort_key': ['name', 'id'],
             'sort_dir': ['desc', 'asc'],
             'sort': None,
-            'verbose': False
+            'verbose': False,
+            'os_hidden': False
         }
         args = self._make_args(input)
         with mock.patch.object(self.gc.images, 'list') as mocked_list:
@@ -183,7 +277,44 @@ class ShellV2Test(testtools.TestCase):
                 'member_status': 'Fake',
                 'visibility': True,
                 'checksum': 'fake_checksum',
-                'tag': 'fake tag'
+                'tag': 'fake tag',
+                'os_hidden': False
+            }
+            mocked_list.assert_called_once_with(page_size=18,
+                                                sort_key=['name', 'id'],
+                                                sort_dir=['desc', 'asc'],
+                                                filters=exp_img_filters)
+            utils.print_list.assert_called_once_with({}, ['ID', 'Name'])
+
+    def test_do_image_list_with_hidden_true(self):
+        input = {
+            'limit': None,
+            'page_size': 18,
+            'visibility': True,
+            'member_status': 'Fake',
+            'owner': 'test',
+            'checksum': 'fake_checksum',
+            'tag': 'fake tag',
+            'properties': [],
+            'sort_key': ['name', 'id'],
+            'sort_dir': ['desc', 'asc'],
+            'sort': None,
+            'verbose': False,
+            'os_hidden': True
+        }
+        args = self._make_args(input)
+        with mock.patch.object(self.gc.images, 'list') as mocked_list:
+            mocked_list.return_value = {}
+
+            test_shell.do_image_list(self.gc, args)
+
+            exp_img_filters = {
+                'owner': 'test',
+                'member_status': 'Fake',
+                'visibility': True,
+                'checksum': 'fake_checksum',
+                'tag': 'fake tag',
+                'os_hidden': True
             }
             mocked_list.assert_called_once_with(page_size=18,
                                                 sort_key=['name', 'id'],
@@ -204,7 +335,8 @@ class ShellV2Test(testtools.TestCase):
             'sort_key': ['name'],
             'sort_dir': ['desc'],
             'sort': None,
-            'verbose': False
+            'verbose': False,
+            'os_hidden': False
         }
         args = self._make_args(input)
         with mock.patch.object(self.gc.images, 'list') as mocked_list:
@@ -217,7 +349,8 @@ class ShellV2Test(testtools.TestCase):
                 'member_status': 'Fake',
                 'visibility': True,
                 'checksum': 'fake_checksum',
-                'tag': 'fake tag'
+                'tag': 'fake tag',
+                'os_hidden': False
             }
             mocked_list.assert_called_once_with(page_size=18,
                                                 sort_key=['name'],
@@ -238,7 +371,8 @@ class ShellV2Test(testtools.TestCase):
             'sort': 'name:desc,size:asc',
             'sort_key': [],
             'sort_dir': [],
-            'verbose': False
+            'verbose': False,
+            'os_hidden': False
         }
         args = self._make_args(input)
         with mock.patch.object(self.gc.images, 'list') as mocked_list:
@@ -251,7 +385,8 @@ class ShellV2Test(testtools.TestCase):
                 'member_status': 'Fake',
                 'visibility': True,
                 'checksum': 'fake_checksum',
-                'tag': 'fake tag'
+                'tag': 'fake tag',
+                'os_hidden': False
             }
             mocked_list.assert_called_once_with(
                 page_size=18,
@@ -272,7 +407,8 @@ class ShellV2Test(testtools.TestCase):
             'sort_key': ['name'],
             'sort_dir': ['desc'],
             'sort': None,
-            'verbose': False
+            'verbose': False,
+            'os_hidden': False
         }
         args = self._make_args(input)
         with mock.patch.object(self.gc.images, 'list') as mocked_list:
@@ -287,7 +423,8 @@ class ShellV2Test(testtools.TestCase):
                 'checksum': 'fake_checksum',
                 'tag': 'fake tag',
                 'os_distro': 'NixOS',
-                'architecture': 'x86_64'
+                'architecture': 'x86_64',
+                'os_hidden': False
             }
 
             mocked_list.assert_called_once_with(page_size=1,
@@ -357,6 +494,111 @@ class ShellV2Test(testtools.TestCase):
             utils.print_dict.assert_called_once_with({
                 'id': 'pass', 'name': 'IMG-01', 'disk_format': 'vhd',
                 'container_format': 'bare'})
+
+    @mock.patch('sys.stdin', autospec=True)
+    def test_do_image_create_for_none_multi_hash(self, mock_stdin):
+        args = self._make_args({'name': 'IMG-01', 'disk_format': 'vhd',
+                                'container_format': 'bare',
+                                'file': None})
+        with mock.patch.object(self.gc.images, 'create') as mocked_create:
+            ignore_fields = ['self', 'access', 'file', 'schema']
+            expect_image = dict([(field, field) for field in ignore_fields])
+            expect_image['id'] = 'pass'
+            expect_image['name'] = 'IMG-01'
+            expect_image['disk_format'] = 'vhd'
+            expect_image['container_format'] = 'bare'
+            expect_image['os_hash_algo'] = None
+            expect_image['os_hash_value'] = None
+            mocked_create.return_value = expect_image
+
+            # Ensure that the test stdin is not considered
+            # to be supplying image data
+            mock_stdin.isatty = lambda: True
+            test_shell.do_image_create(self.gc, args)
+
+            mocked_create.assert_called_once_with(name='IMG-01',
+                                                  disk_format='vhd',
+                                                  container_format='bare')
+            utils.print_dict.assert_called_once_with({
+                'id': 'pass', 'name': 'IMG-01', 'disk_format': 'vhd',
+                'container_format': 'bare', 'os_hash_algo': None,
+                'os_hash_value': None})
+
+    def test_do_image_create_with_multihash(self):
+        self.mock_get_data_file.return_value = six.StringIO()
+        try:
+            with open(tempfile.mktemp(), 'w+') as f:
+                f.write('Some data here')
+                f.flush()
+                f.seek(0)
+                file_name = f.name
+            temp_args = {'name': 'IMG-01',
+                         'disk_format': 'vhd',
+                         'container_format': 'bare',
+                         'file': file_name,
+                         'progress': False}
+            args = self._make_args(temp_args)
+            with mock.patch.object(self.gc.images, 'create') as mocked_create:
+                with mock.patch.object(self.gc.images, 'get') as mocked_get:
+
+                    ignore_fields = ['self', 'access', 'schema']
+                    expect_image = dict([(field, field) for field in
+                                         ignore_fields])
+                    expect_image['id'] = 'pass'
+                    expect_image['name'] = 'IMG-01'
+                    expect_image['disk_format'] = 'vhd'
+                    expect_image['container_format'] = 'bare'
+                    expect_image['checksum'] = 'fake-checksum'
+                    expect_image['os_hash_algo'] = 'fake-hash_algo'
+                    expect_image['os_hash_value'] = 'fake-hash_value'
+                    mocked_create.return_value = expect_image
+                    mocked_get.return_value = expect_image
+
+                    test_shell.do_image_create(self.gc, args)
+
+                    temp_args.pop('file', None)
+                    mocked_create.assert_called_once_with(**temp_args)
+                    mocked_get.assert_called_once_with('pass')
+                    utils.print_dict.assert_called_once_with({
+                        'id': 'pass', 'name': 'IMG-01', 'disk_format': 'vhd',
+                        'container_format': 'bare',
+                        'checksum': 'fake-checksum',
+                        'os_hash_algo': 'fake-hash_algo',
+                        'os_hash_value': 'fake-hash_value'})
+        finally:
+            try:
+                os.remove(f.name)
+            except Exception:
+                pass
+
+    @mock.patch('sys.stdin', autospec=True)
+    def test_do_image_create_hidden_image(self, mock_stdin):
+        args = self._make_args({'name': 'IMG-01', 'disk_format': 'vhd',
+                                'container_format': 'bare',
+                                'file': None,
+                                'os_hidden': True})
+        with mock.patch.object(self.gc.images, 'create') as mocked_create:
+            ignore_fields = ['self', 'access', 'file', 'schema']
+            expect_image = dict([(field, field) for field in ignore_fields])
+            expect_image['id'] = 'pass'
+            expect_image['name'] = 'IMG-01'
+            expect_image['disk_format'] = 'vhd'
+            expect_image['container_format'] = 'bare'
+            expect_image['os_hidden'] = True
+            mocked_create.return_value = expect_image
+
+            # Ensure that the test stdin is not considered
+            # to be supplying image data
+            mock_stdin.isatty = lambda: True
+            test_shell.do_image_create(self.gc, args)
+
+            mocked_create.assert_called_once_with(name='IMG-01',
+                                                  disk_format='vhd',
+                                                  container_format='bare',
+                                                  os_hidden=True)
+            utils.print_dict.assert_called_once_with({
+                'id': 'pass', 'name': 'IMG-01', 'disk_format': 'vhd',
+                'container_format': 'bare', 'os_hidden': True})
 
     def test_do_image_create_with_file(self):
         self.mock_get_data_file.return_value = six.StringIO()
@@ -447,6 +689,622 @@ class ShellV2Test(testtools.TestCase):
             utils.print_dict.assert_called_once_with({
                 'id': 'pass', 'name': 'IMG-01', 'myprop': 'myval'})
 
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('os.access')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_do_image_create_no_file_and_stdin_with_backend(
+            self, mock_stdin, mock_access, mock_utils_exit):
+        expected_msg = ('--backend option should only be provided with --file '
+                        'option or stdin.')
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        mock_stdin.isatty = lambda: True
+        mock_access.return_value = False
+        args = self._make_args({'name': 'IMG-01',
+                                'property': ['myprop=myval'],
+                                'file': None,
+                                'backend': 'file1',
+                                'container_format': 'bare',
+                                'disk_format': 'qcow2'})
+
+        try:
+            test_shell.do_image_create(self.gc, args)
+            self.fail("utils.exit should have been called")
+        except SystemExit:
+            pass
+
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_neg_do_image_create_invalid_backend(
+            self, mock_utils_exit):
+        expected_msg = ("Backend 'dummy' is not valid for this cloud. "
+                        "Valid values can be retrieved with stores-info "
+                        "command.")
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        args = self._make_args({'name': 'IMG-01',
+                                'property': ['myprop=myval'],
+                                'file': "somefile.txt",
+                                'backend': 'dummy',
+                                'container_format': 'bare',
+                                'disk_format': 'qcow2'})
+
+        with mock.patch.object(self.gc.images,
+                               'get_stores_info') as mock_stores_info:
+            mock_stores_info.return_value = self.stores_info_response
+            try:
+                test_shell.do_image_create(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    # NOTE(rosmaita): have to explicitly set to None the declared but unused
+    # arguments (the configparser does that for us normally)
+    base_args = {'name': 'Mortimer',
+                 'disk_format': 'raw',
+                 'container_format': 'bare',
+                 'progress': False,
+                 'file': None,
+                 'uri': None,
+                 'import_method': None}
+
+    import_info_response = {'import-methods': {
+        'type': 'array',
+        'description': 'Import methods available.',
+        'value': ['glance-direct', 'web-download']}}
+
+    def _mock_utils_exit(self, msg):
+        sys.exit(msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('os.access')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_no_method_with_file_and_stdin(
+            self, mock_stdin, mock_access, mock_utils_exit):
+        expected_msg = ('You cannot use both --file and stdin with the '
+                        'glance-direct import method.')
+        my_args = self.base_args.copy()
+        my_args['file'] = 'some.file'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: False
+        mock_access.return_value = True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('os.access')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_no_file_and_stdin_with_backend(
+            self, mock_stdin, mock_access, mock_utils_exit):
+        expected_msg = ('--backend option should only be provided with --file '
+                        'option or stdin for the glance-direct import method.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'glance-direct'
+        my_args['backend'] = 'file1'
+        args = self._make_args(my_args)
+
+        mock_stdin.isatty = lambda: True
+        mock_access.return_value = False
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            with mock.patch.object(self.gc.images,
+                                   'get_stores_info') as mocked_stores_info:
+                mocked_stores_info.return_value = self.stores_info_response
+                mocked_info.return_value = self.import_info_response
+                try:
+                    test_shell.do_image_create_via_import(self.gc, args)
+                    self.fail("utils.exit should have been called")
+                except SystemExit:
+                    pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_no_uri_with_backend(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('--backend option should only be provided with --uri '
+                        'option for the web-download import method.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'web-download'
+        my_args['backend'] = 'file1'
+        args = self._make_args(my_args)
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            with mock.patch.object(self.gc.images,
+                                   'get_stores_info') as mocked_stores_info:
+                mocked_stores_info.return_value = self.stores_info_response
+                mocked_info.return_value = self.import_info_response
+                try:
+                    test_shell.do_image_create_via_import(self.gc, args)
+                    self.fail("utils.exit should have been called")
+                except SystemExit:
+                    pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('os.access')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_invalid_backend(
+            self, mock_stdin, mock_access, mock_utils_exit):
+        expected_msg = ("Backend 'dummy' is not valid for this cloud. "
+                        "Valid values can be retrieved with stores-info"
+                        " command.")
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'glance-direct'
+        my_args['backend'] = 'dummy'
+        args = self._make_args(my_args)
+
+        mock_stdin.isatty = lambda: True
+        mock_access.return_value = False
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            with mock.patch.object(self.gc.images,
+                                   'get_stores_info') as mocked_stores_info:
+                mocked_stores_info.return_value = self.stores_info_response
+                mocked_info.return_value = self.import_info_response
+                try:
+                    test_shell.do_image_create_via_import(self.gc, args)
+                    self.fail("utils.exit should have been called")
+                except SystemExit:
+                    pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_no_method_passing_uri(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('You cannot use --uri without specifying an import '
+                        'method.')
+        my_args = self.base_args.copy()
+        my_args['uri'] = 'http://example.com/whatever'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_glance_direct_no_data(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('You must specify a --file or provide data via stdin '
+                        'for the glance-direct import method.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'glance-direct'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_glance_direct_with_uri(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('You cannot specify a --uri with the glance-direct '
+                        'import method.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'glance-direct'
+        my_args['uri'] = 'https://example.com/some/stuff'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('os.access')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_glance_direct_with_file_and_uri(
+            self, mock_stdin, mock_access, mock_utils_exit):
+        expected_msg = ('You cannot specify a --uri with the glance-direct '
+                        'import method.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'glance-direct'
+        my_args['uri'] = 'https://example.com/some/stuff'
+        my_args['file'] = 'my.browncow'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_access.return_value = True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_glance_direct_with_data_and_uri(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('You cannot specify a --uri with the glance-direct '
+                        'import method.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'glance-direct'
+        my_args['uri'] = 'https://example.com/some/stuff'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: False
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_web_download_no_uri(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('URI is required for web-download import method. '
+                        'Please use \'--uri <uri>\'.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'web-download'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_web_download_no_uri_with_file(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('URI is required for web-download import method. '
+                        'Please use \'--uri <uri>\'.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'web-download'
+        my_args['file'] = 'my.browncow'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_web_download_no_uri_with_data(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('URI is required for web-download import method. '
+                        'Please use \'--uri <uri>\'.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'web-download'
+        my_args['file'] = 'my.browncow'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: False
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_web_download_with_data_and_uri(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('You cannot pass data via stdin with the web-download '
+                        'import method.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'web-download'
+        my_args['uri'] = 'https://example.com/some/stuff'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: False
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_web_download_with_file_and_uri(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('You cannot specify a --file with the web-download '
+                        'import method.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'web-download'
+        my_args['uri'] = 'https://example.com/some/stuff'
+        my_args['file'] = 'my.browncow'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_bad_method(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('Import method \'swift-party-time\' is not valid '
+                        'for this cloud. Valid values can be retrieved with '
+                        'import-info command.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'swift-party-time'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_no_method_with_data_and_method_NA(
+            self, mock_stdin, mock_utils_exit):
+        expected_msg = ('Import method \'glance-direct\' is not valid '
+                        'for this cloud. Valid values can be retrieved with '
+                        'import-info command.')
+        args = self._make_args(self.base_args)
+        # need to fake some data, or this is "just like" a
+        # create-image-record-only call
+        mock_stdin.isatty = lambda: False
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        my_import_info_response = deepcopy(self.import_info_response)
+        my_import_info_response['import-methods']['value'] = ['web-download']
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = my_import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_neg_image_create_via_import_good_method_not_available(
+            self, mock_stdin, mock_utils_exit):
+        """Make sure the good method names aren't hard coded somewhere"""
+        expected_msg = ('Import method \'glance-direct\' is not valid for '
+                        'this cloud. Valid values can be retrieved with '
+                        'import-info command.')
+        my_args = self.base_args.copy()
+        my_args['import_method'] = 'glance-direct'
+        args = self._make_args(my_args)
+        mock_stdin.isatty = lambda: True
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        my_import_info_response = deepcopy(self.import_info_response)
+        my_import_info_response['import-methods']['value'] = ['bad-bad-method']
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = my_import_info_response
+            try:
+                test_shell.do_image_create_via_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.v2.shell.do_image_import')
+    @mock.patch('glanceclient.v2.shell.do_image_stage')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_image_create_via_import_no_method_with_stdin(
+            self, mock_stdin, mock_do_stage, mock_do_import):
+        """Backward compat -> handle this like a glance-direct"""
+        mock_stdin.isatty = lambda: False
+        self.mock_get_data_file.return_value = six.StringIO()
+        args = self._make_args(self.base_args)
+        with mock.patch.object(self.gc.images, 'create') as mocked_create:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                with mock.patch.object(self.gc.images,
+                                       'get_import_info') as mocked_info:
+
+                    ignore_fields = ['self', 'access', 'schema']
+                    expect_image = dict([(field, field) for field in
+                                         ignore_fields])
+                    expect_image['id'] = 'via-stdin'
+                    expect_image['name'] = 'Mortimer'
+                    expect_image['disk_format'] = 'raw'
+                    expect_image['container_format'] = 'bare'
+                    mocked_create.return_value = expect_image
+                    mocked_get.return_value = expect_image
+                    mocked_info.return_value = self.import_info_response
+
+                    test_shell.do_image_create_via_import(self.gc, args)
+                    mocked_create.assert_called_once()
+                    mock_do_stage.assert_called_once()
+                    mock_do_import.assert_called_once()
+                    mocked_get.assert_called_with('via-stdin')
+                    utils.print_dict.assert_called_with({
+                        'id': 'via-stdin', 'name': 'Mortimer',
+                        'disk_format': 'raw', 'container_format': 'bare'})
+
+    @mock.patch('glanceclient.v2.shell.do_image_import')
+    @mock.patch('glanceclient.v2.shell.do_image_stage')
+    @mock.patch('os.access')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_image_create_via_import_no_method_passing_file(
+            self, mock_stdin, mock_access, mock_do_stage, mock_do_import):
+        """Backward compat -> handle this like a glance-direct"""
+        mock_stdin.isatty = lambda: True
+        self.mock_get_data_file.return_value = six.StringIO()
+        mock_access.return_value = True
+        my_args = self.base_args.copy()
+        my_args['file'] = 'fake-image-file.browncow'
+        args = self._make_args(my_args)
+        with mock.patch.object(self.gc.images, 'create') as mocked_create:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                with mock.patch.object(self.gc.images,
+                                       'get_import_info') as mocked_info:
+
+                    ignore_fields = ['self', 'access', 'schema']
+                    expect_image = dict([(field, field) for field in
+                                         ignore_fields])
+                    expect_image['id'] = 'via-file'
+                    expect_image['name'] = 'Mortimer'
+                    expect_image['disk_format'] = 'raw'
+                    expect_image['container_format'] = 'bare'
+                    mocked_create.return_value = expect_image
+                    mocked_get.return_value = expect_image
+                    mocked_info.return_value = self.import_info_response
+
+                    test_shell.do_image_create_via_import(self.gc, args)
+                    mocked_create.assert_called_once()
+                    mock_do_stage.assert_called_once()
+                    mock_do_import.assert_called_once()
+                    mocked_get.assert_called_with('via-file')
+                    utils.print_dict.assert_called_with({
+                        'id': 'via-file', 'name': 'Mortimer',
+                        'disk_format': 'raw', 'container_format': 'bare'})
+
+    @mock.patch('glanceclient.v2.shell.do_image_import')
+    @mock.patch('glanceclient.v2.shell.do_image_stage')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_do_image_create_via_import_with_no_method_no_data(
+            self, mock_stdin, mock_do_image_stage, mock_do_image_import):
+        """Create an image record without calling do_stage or do_import"""
+        img_create_args = {'name': 'IMG-11',
+                           'os_architecture': 'powerpc',
+                           'id': 'watch-out-for-ossn-0075',
+                           'progress': False}
+        client_args = {'import_method': None,
+                       'file': None,
+                       'uri': None}
+        temp_args = img_create_args.copy()
+        temp_args.update(client_args)
+        args = self._make_args(temp_args)
+        with mock.patch.object(self.gc.images, 'create') as mocked_create:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                with mock.patch.object(self.gc.images,
+                                       'get_import_info') as mocked_info:
+
+                    ignore_fields = ['self', 'access', 'schema']
+                    expect_image = dict([(field, field) for field in
+                                         ignore_fields])
+                    expect_image['name'] = 'IMG-11'
+                    expect_image['id'] = 'watch-out-for-ossn-0075'
+                    expect_image['os_architecture'] = 'powerpc'
+                    mocked_create.return_value = expect_image
+                    mocked_get.return_value = expect_image
+                    mocked_info.return_value = self.import_info_response
+                    mock_stdin.isatty = lambda: True
+
+                    test_shell.do_image_create_via_import(self.gc, args)
+                    mocked_create.assert_called_once_with(**img_create_args)
+                    mocked_get.assert_called_with('watch-out-for-ossn-0075')
+                    mock_do_image_stage.assert_not_called()
+                    mock_do_image_import.assert_not_called()
+                    utils.print_dict.assert_called_with({
+                        'name': 'IMG-11', 'os_architecture': 'powerpc',
+                        'id': 'watch-out-for-ossn-0075'})
+
+    @mock.patch('glanceclient.v2.shell.do_image_import')
+    @mock.patch('glanceclient.v2.shell.do_image_stage')
+    @mock.patch('sys.stdin', autospec=True)
+    def test_do_image_create_via_import_with_web_download(
+            self, mock_stdin, mock_do_image_stage, mock_do_image_import):
+        temp_args = {'name': 'IMG-01',
+                     'disk_format': 'vhd',
+                     'container_format': 'bare',
+                     'uri': 'http://example.com/image.qcow',
+                     'import_method': 'web-download',
+                     'progress': False}
+        args = self._make_args(temp_args)
+        with mock.patch.object(self.gc.images, 'create') as mocked_create:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                with mock.patch.object(self.gc.images,
+                                       'get_import_info') as mocked_info:
+
+                    ignore_fields = ['self', 'access', 'schema']
+                    expect_image = dict([(field, field) for field in
+                                         ignore_fields])
+                    expect_image['id'] = 'pass'
+                    expect_image['name'] = 'IMG-01'
+                    expect_image['disk_format'] = 'vhd'
+                    expect_image['container_format'] = 'bare'
+                    expect_image['status'] = 'queued'
+                    mocked_create.return_value = expect_image
+                    mocked_get.return_value = expect_image
+                    mocked_info.return_value = self.import_info_response
+                    mock_stdin.isatty = lambda: True
+
+                    test_shell.do_image_create_via_import(self.gc, args)
+                    mock_do_image_stage.assert_not_called()
+                    mock_do_image_import.assert_called_once()
+                    mocked_create.assert_called_once_with(**temp_args)
+                    mocked_get.assert_called_with('pass')
+                    utils.print_dict.assert_called_with({
+                        'id': 'pass', 'name': 'IMG-01', 'disk_format': 'vhd',
+                        'container_format': 'bare', 'status': 'queued'})
+
     def test_do_image_update_no_user_props(self):
         args = self._make_args({'id': 'pass', 'name': 'IMG-01',
                                 'disk_format': 'vhd',
@@ -470,6 +1328,48 @@ class ShellV2Test(testtools.TestCase):
             utils.print_dict.assert_called_once_with({
                 'id': 'pass', 'name': 'IMG-01', 'disk_format': 'vhd',
                 'container_format': 'bare'})
+
+    def test_do_image_update_hide_image(self):
+        args = self._make_args({'id': 'pass', 'os_hidden': 'true'})
+        with mock.patch.object(self.gc.images, 'update') as mocked_update:
+            ignore_fields = ['self', 'access', 'file', 'schema']
+            expect_image = dict([(field, field) for field in ignore_fields])
+            expect_image['id'] = 'pass'
+            expect_image['name'] = 'IMG-01'
+            expect_image['disk_format'] = 'vhd'
+            expect_image['container_format'] = 'bare'
+            expect_image['os_hidden'] = True
+            mocked_update.return_value = expect_image
+
+            test_shell.do_image_update(self.gc, args)
+
+            mocked_update.assert_called_once_with('pass',
+                                                  None,
+                                                  os_hidden='true')
+            utils.print_dict.assert_called_once_with({
+                'id': 'pass', 'name': 'IMG-01', 'disk_format': 'vhd',
+                'container_format': 'bare', 'os_hidden': True})
+
+    def test_do_image_update_revert_hide_image(self):
+        args = self._make_args({'id': 'pass', 'os_hidden': 'false'})
+        with mock.patch.object(self.gc.images, 'update') as mocked_update:
+            ignore_fields = ['self', 'access', 'file', 'schema']
+            expect_image = dict([(field, field) for field in ignore_fields])
+            expect_image['id'] = 'pass'
+            expect_image['name'] = 'IMG-01'
+            expect_image['disk_format'] = 'vhd'
+            expect_image['container_format'] = 'bare'
+            expect_image['os_hidden'] = False
+            mocked_update.return_value = expect_image
+
+            test_shell.do_image_update(self.gc, args)
+
+            mocked_update.assert_called_once_with('pass',
+                                                  None,
+                                                  os_hidden='false')
+            utils.print_dict.assert_called_once_with({
+                'id': 'pass', 'name': 'IMG-01', 'disk_format': 'vhd',
+                'container_format': 'bare', 'os_hidden': False})
 
     def test_do_image_update_with_user_props(self):
         args = self._make_args({'id': 'pass', 'name': 'IMG-01',
@@ -575,27 +1475,290 @@ class ShellV2Test(testtools.TestCase):
             utils.get_data_file = mock.Mock(return_value='testfile')
             mocked_upload.return_value = None
             test_shell.do_image_upload(self.gc, args)
-            mocked_upload.assert_called_once_with('IMG-01', 'testfile', 1024)
+            mocked_upload.assert_called_once_with('IMG-01', 'testfile', 1024,
+                                                  backend=None)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_image_upload_invalid_backend(self, mock_utils_exit):
+        expected_msg = ("Backend 'dummy' is not valid for this cloud. "
+                        "Valid values can be retrieved with stores-info "
+                        "command.")
+        mock_utils_exit.side_effect = self._mock_utils_exit
+
+        args = self._make_args(
+            {'id': 'IMG-01', 'file': 'test', 'size': 1024, 'progress': False,
+             'backend': 'dummy'})
+
+        with mock.patch.object(self.gc.images,
+                               'get_stores_info') as mock_stores_info:
+            mock_stores_info.return_value = self.stores_info_response
+            try:
+                test_shell.do_image_upload(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_neg_image_import_not_available(self, mock_utils_exit):
+        expected_msg = 'Target Glance does not support Image Import workflow'
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'smarty-pants', 'uri': None})
+        with mock.patch.object(self.gc.images, 'import') as mocked_import:
+            with mock.patch.object(self.gc.images,
+                                   'get_import_info') as mocked_info:
+                mocked_info.side_effect = exc.HTTPNotFound
+                try:
+                    test_shell.do_image_import(self.gc, args)
+                    self.fail("utils.exit should have been called")
+                except SystemExit:
+                    pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+        mocked_import.assert_not_called()
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_neg_image_import_bad_method(self, mock_utils_exit):
+        expected_msg = ('Import method \'smarty-pants\' is not valid for this '
+                        'cloud. Valid values can be retrieved with '
+                        'import-info command.')
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'smarty-pants', 'uri': None})
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = self.import_info_response
+            try:
+                test_shell.do_image_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_neg_image_import_no_methods_configured(self, mock_utils_exit):
+        expected_msg = ('Import method \'glance-direct\' is not valid for '
+                        'this cloud. Valid values can be retrieved with '
+                        'import-info command.')
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'glance-direct', 'uri': None})
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            mocked_info.return_value = {"import-methods": {"value": []}}
+            try:
+                test_shell.do_image_import(self.gc, args)
+                self.fail("utils.exit should have been called")
+            except SystemExit:
+                pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_neg_image_import_glance_direct_image_not_uploading_status(
+            self, mock_utils_exit):
+        expected_msg = ('The \'glance-direct\' import method can only be '
+                        'applied to an image in status \'uploading\'')
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'glance-direct', 'uri': None})
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                mocked_get.return_value = {'status': 'queued',
+                                           'container_format': 'bare',
+                                           'disk_format': 'raw'}
+                mocked_info.return_value = self.import_info_response
+                try:
+                    test_shell.do_image_import(self.gc, args)
+                    self.fail("utils.exit should have been called")
+                except SystemExit:
+                    pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_neg_image_import_web_download_image_not_queued_status(
+            self, mock_utils_exit):
+        expected_msg = ('The \'web-download\' import method can only be '
+                        'applied to an image in status \'queued\'')
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'web-download',
+             'uri': 'http://joes-image-shack.com/funky.qcow2'})
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                mocked_get.return_value = {'status': 'uploading',
+                                           'container_format': 'bare',
+                                           'disk_format': 'raw'}
+                mocked_info.return_value = self.import_info_response
+                try:
+                    test_shell.do_image_import(self.gc, args)
+                    self.fail("utils.exit should have been called")
+                except SystemExit:
+                    pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_neg_image_import_image_no_container_format(
+            self, mock_utils_exit):
+        expected_msg = ('The \'container_format\' and \'disk_format\' '
+                        'properties must be set on an image before it can be '
+                        'imported.')
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'web-download',
+             'uri': 'http://joes-image-shack.com/funky.qcow2'})
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                mocked_get.return_value = {'status': 'uploading',
+                                           'disk_format': 'raw'}
+                mocked_info.return_value = self.import_info_response
+                try:
+                    test_shell.do_image_import(self.gc, args)
+                    self.fail("utils.exit should have been called")
+                except SystemExit:
+                    pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_neg_image_import_image_no_disk_format(
+            self, mock_utils_exit):
+        expected_msg = ('The \'container_format\' and \'disk_format\' '
+                        'properties must be set on an image before it can be '
+                        'imported.')
+        mock_utils_exit.side_effect = self._mock_utils_exit
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'web-download',
+             'uri': 'http://joes-image-shack.com/funky.qcow2'})
+        with mock.patch.object(self.gc.images,
+                               'get_import_info') as mocked_info:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                mocked_get.return_value = {'status': 'uploading',
+                                           'container_format': 'bare'}
+                mocked_info.return_value = self.import_info_response
+                try:
+                    test_shell.do_image_import(self.gc, args)
+                    self.fail("utils.exit should have been called")
+                except SystemExit:
+                    pass
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    @mock.patch('glanceclient.common.utils.exit')
+    def test_image_import_invalid_backend(self, mock_utils_exit):
+        expected_msg = ("Backend 'dummy' is not valid for this cloud. "
+                        "Valid values can be retrieved with stores-info "
+                        "command.")
+        mock_utils_exit.side_effect = self._mock_utils_exit
+
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'glance-direct', 'uri': None,
+             'backend': 'dummy'})
+
+        with mock.patch.object(self.gc.images, 'get') as mocked_get:
+            with mock.patch.object(self.gc.images,
+                                   'get_import_info') as mocked_info:
+                mocked_get.return_value = {'status': 'uploading',
+                                           'container_format': 'bare',
+                                           'disk_format': 'raw'}
+                with mock.patch.object(self.gc.images,
+                                       'get_stores_info') as mock_stores_info:
+                    mocked_info.return_value = self.import_info_response
+                    mock_stores_info.return_value = self.stores_info_response
+                    try:
+                        test_shell.do_image_import(self.gc, args)
+                        self.fail("utils.exit should have been called")
+                    except SystemExit:
+                        pass
+
+        mock_utils_exit.assert_called_once_with(expected_msg)
+
+    def test_image_import_glance_direct(self):
+        args = self._make_args(
+            {'id': 'IMG-01', 'import_method': 'glance-direct', 'uri': None})
+        with mock.patch.object(self.gc.images, 'image_import') as mock_import:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                with mock.patch.object(self.gc.images,
+                                       'get_import_info') as mocked_info:
+                    mocked_get.return_value = {'status': 'uploading',
+                                               'container_format': 'bare',
+                                               'disk_format': 'raw'}
+                    mocked_info.return_value = self.import_info_response
+                    mock_import.return_value = None
+                    test_shell.do_image_import(self.gc, args)
+                    mock_import.assert_called_once_with(
+                        'IMG-01', 'glance-direct', None, backend=None)
+
+    def test_image_import_web_download(self):
+        args = self._make_args(
+            {'id': 'IMG-01', 'uri': 'http://example.com/image.qcow',
+             'import_method': 'web-download'})
+        with mock.patch.object(self.gc.images, 'image_import') as mock_import:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                with mock.patch.object(self.gc.images,
+                                       'get_import_info') as mocked_info:
+                    mocked_get.return_value = {'status': 'queued',
+                                               'container_format': 'bare',
+                                               'disk_format': 'raw'}
+                    mocked_info.return_value = self.import_info_response
+                    mock_import.return_value = None
+                    test_shell.do_image_import(self.gc, args)
+                    mock_import.assert_called_once_with(
+                        'IMG-01', 'web-download',
+                        'http://example.com/image.qcow', backend=None)
+
+    @mock.patch('glanceclient.common.utils.print_image')
+    def test_image_import_no_print_image(self, mocked_utils_print_image):
+        args = self._make_args(
+            {'id': 'IMG-02', 'uri': None, 'import_method': 'glance-direct',
+             'from_create': True})
+        with mock.patch.object(self.gc.images, 'image_import') as mock_import:
+            with mock.patch.object(self.gc.images, 'get') as mocked_get:
+                with mock.patch.object(self.gc.images,
+                                       'get_import_info') as mocked_info:
+                    mocked_get.return_value = {'status': 'uploading',
+                                               'container_format': 'bare',
+                                               'disk_format': 'raw'}
+                    mocked_info.return_value = self.import_info_response
+                    mock_import.return_value = None
+                    test_shell.do_image_import(self.gc, args)
+                    mock_import.assert_called_once_with(
+                        'IMG-02', 'glance-direct', None, backend=None)
+                    mocked_utils_print_image.assert_not_called()
 
     def test_image_download(self):
         args = self._make_args(
-            {'id': 'IMG-01', 'file': 'test', 'progress': True})
+            {'id': 'IMG-01', 'file': 'test', 'progress': True,
+             'allow_md5_fallback': False})
 
-        with mock.patch.object(self.gc.images, 'data') as mocked_data:
-            def _data():
-                for c in 'abcedf':
-                    yield c
-            mocked_data.return_value = utils.IterableWithLength(_data(), 5)
+        with mock.patch.object(self.gc.images, 'data') as mocked_data, \
+                mock.patch.object(utils, '_extract_request_id'):
+            mocked_data.return_value = utils.RequestIdProxy(
+                [c for c in 'abcdef'])
 
             test_shell.do_image_download(self.gc, args)
-            mocked_data.assert_called_once_with('IMG-01')
+            mocked_data.assert_called_once_with('IMG-01',
+                                                allow_md5_fallback=False)
+
+        # check that non-default value is being passed correctly
+        args.allow_md5_fallback = True
+        with mock.patch.object(self.gc.images, 'data') as mocked_data, \
+                mock.patch.object(utils, '_extract_request_id'):
+            mocked_data.return_value = utils.RequestIdProxy(
+                [c for c in 'abcdef'])
+
+            test_shell.do_image_download(self.gc, args)
+            mocked_data.assert_called_once_with('IMG-01',
+                                                allow_md5_fallback=True)
 
     @mock.patch.object(utils, 'exit')
     @mock.patch('sys.stdout', autospec=True)
     def test_image_download_no_file_arg(self, mocked_stdout,
                                         mocked_utils_exit):
         # Indicate that no file name was given as command line argument
-        args = self._make_args({'id': '1234', 'file': None, 'progress': False})
+        args = self._make_args({'id': '1234', 'file': None, 'progress': False,
+                                'allow_md5_fallback': False})
         # Indicate that no file is specified for output redirection
         mocked_stdout.isatty = lambda: True
         test_shell.do_image_download(self.gc, args)
@@ -681,10 +1844,14 @@ class ShellV2Test(testtools.TestCase):
             self.assert_exits_with_msg(func=test_shell.do_image_delete,
                                        func_args=args)
 
+    @mock.patch('sys.stdout', autospec=True)
     @mock.patch.object(utils, 'print_err')
-    def test_do_image_download_with_forbidden_id(self, mocked_print_err):
+    def test_do_image_download_with_forbidden_id(self, mocked_print_err,
+                                                 mocked_stdout):
         args = self._make_args({'id': 'IMG-01', 'file': None,
-                                'progress': False})
+                                'progress': False,
+                                'allow_md5_fallback': False})
+        mocked_stdout.isatty = lambda: False
         with mock.patch.object(self.gc.images, 'data') as mocked_data:
             mocked_data.side_effect = exc.HTTPForbidden
             try:
@@ -696,10 +1863,13 @@ class ShellV2Test(testtools.TestCase):
             self.assertEqual(1, mocked_data.call_count)
             self.assertEqual(1, mocked_print_err.call_count)
 
+    @mock.patch('sys.stdout', autospec=True)
     @mock.patch.object(utils, 'print_err')
-    def test_do_image_download_with_500(self, mocked_print_err):
+    def test_do_image_download_with_500(self, mocked_print_err, mocked_stdout):
         args = self._make_args({'id': 'IMG-01', 'file': None,
-                                'progress': False})
+                                'progress': False,
+                                'allow_md5_fallback': False})
+        mocked_stdout.isatty = lambda: False
         with mock.patch.object(self.gc.images, 'data') as mocked_data:
             mocked_data.side_effect = exc.HTTPInternalServerError
             try:

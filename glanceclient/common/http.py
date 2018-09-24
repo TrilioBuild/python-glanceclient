@@ -24,6 +24,7 @@ from oslo_utils import importutils
 from oslo_utils import netutils
 import requests
 import six
+import six.moves.urllib.parse as urlparse
 
 try:
     import json
@@ -41,6 +42,7 @@ LOG = logging.getLogger(__name__)
 USER_AGENT = 'python-glanceclient'
 CHUNKSIZE = 1024 * 64  # 64kB
 REQ_ID_HEADER = 'X-OpenStack-Request-ID'
+TOKEN_HEADERS = ['X-Auth-Token', 'X-Service-Token']
 
 
 def encode_headers(headers):
@@ -53,8 +55,30 @@ def encode_headers(headers):
     :returns: Dictionary with encoded headers'
               names and values
     """
-    return dict((encodeutils.safe_encode(h), encodeutils.safe_encode(v))
-                for h, v in headers.items() if v is not None)
+    # NOTE(rosmaita): This function's rejection of any header name without a
+    # corresponding value is arguably justified by RFC 7230.  In any case, that
+    # behavior was already here and there is an existing unit test for it.
+
+    # Bug #1766235: According to RFC 8187, headers must be encoded as ASCII.
+    # So we first %-encode them to get them into range < 128 and then turn
+    # them into ASCII.
+    encoded_dict = {}
+    for h, v in headers.items():
+        if v is not None:
+            # if the item is token, do not quote '+' as well.
+            safe = '=+/' if h in TOKEN_HEADERS else '/'
+            if six.PY2:
+                # incoming items may be unicode, so get them into something
+                # the py2 version of urllib can handle before percent encoding
+                key = urlparse.quote(encodeutils.safe_encode(h), safe)
+                value = urlparse.quote(encodeutils.safe_encode(v), safe)
+            else:
+                key = urlparse.quote(h, safe)
+                value = urlparse.quote(v, safe)
+            encoded_dict[key] = value
+    return dict((encodeutils.safe_encode(h, encoding='ascii'),
+                 encodeutils.safe_encode(v, encoding='ascii'))
+                for h, v in encoded_dict.items())
 
 
 class _BaseHTTPClient(object):

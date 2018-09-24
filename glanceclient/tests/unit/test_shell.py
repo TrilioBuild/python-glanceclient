@@ -15,10 +15,7 @@
 #    under the License.
 
 import argparse
-try:
-    from collections import OrderedDict
-except ImportError:
-    from ordereddict import OrderedDict
+from collections import OrderedDict
 import hashlib
 import logging
 import os
@@ -306,17 +303,6 @@ class ShellTest(testutils.TestCase):
         ((api_version, args), kwargs) = mock_versioned_client.call_args
         self.assertEqual('mycert', args.os_cert)
         self.assertEqual('mykey', args.os_key)
-
-        # make sure we get the same thing with --cert-file and --key-file
-        args = ('--os-image-api-version 2 '
-                '--cert-file mycertfile '
-                '--key-file mykeyfile image-list')
-        glance_shell = openstack_shell.OpenStackImagesShell()
-        glance_shell.main(args.split())
-        assert mock_versioned_client.called
-        ((api_version, args), kwargs) = mock_versioned_client.call_args
-        self.assertEqual('mycertfile', args.os_cert)
-        self.assertEqual('mykeyfile', args.os_key)
 
     @mock.patch('glanceclient.v1.client.Client')
     def test_no_auth_with_token_and_image_url_with_v1(self, v1_client):
@@ -813,10 +799,10 @@ class ShellCacheSchemaTest(testutils.TestCase):
                          open.mock_calls[0])
         self.assertEqual(mock.call(self.cache_files[1], 'w'),
                          open.mock_calls[4])
-        self.assertEqual(mock.call().write(json.dumps(schema_odict)),
-                         open.mock_calls[2])
-        self.assertEqual(mock.call().write(json.dumps(schema_odict)),
-                         open.mock_calls[6])
+        actual = json.loads(open.mock_calls[2][1][0])
+        self.assertEqual(schema_odict, actual)
+        actual = json.loads(open.mock_calls[6][1][0])
+        self.assertEqual(schema_odict, actual)
 
     @mock.patch('six.moves.builtins.open', new=mock.mock_open(), create=True)
     @mock.patch('os.path.exists', side_effect=[True, False, False, False])
@@ -836,10 +822,10 @@ class ShellCacheSchemaTest(testutils.TestCase):
                          open.mock_calls[0])
         self.assertEqual(mock.call(self.cache_files[1], 'w'),
                          open.mock_calls[4])
-        self.assertEqual(mock.call().write(json.dumps(schema_odict)),
-                         open.mock_calls[2])
-        self.assertEqual(mock.call().write(json.dumps(schema_odict)),
-                         open.mock_calls[6])
+        actual = json.loads(open.mock_calls[2][1][0])
+        self.assertEqual(schema_odict, actual)
+        actual = json.loads(open.mock_calls[6][1][0])
+        self.assertEqual(schema_odict, actual)
 
     @mock.patch('six.moves.builtins.open', new=mock.mock_open(), create=True)
     @mock.patch('os.path.exists', return_value=True)
@@ -979,7 +965,9 @@ class ShellTestRequests(testutils.TestCase):
             self.requests = self.useFixture(rm_fixture.Fixture())
             self.requests.get('http://example.com/v2/images/%s/file' % id,
                               headers=headers, raw=fake)
-
+            self.requests.get('http://example.com/v2/images/%s' % id,
+                              headers={'Content-type': 'application/json'},
+                              json=image_show_fixture)
             shell = openstack_shell.OpenStackImagesShell()
             argstr = ('--os-image-api-version 2 --os-auth-token faketoken '
                       '--os-image-url http://example.com '

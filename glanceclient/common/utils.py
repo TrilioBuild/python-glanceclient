@@ -177,6 +177,12 @@ def pretty_choice_list(l):
 
 
 def print_list(objs, fields, formatters=None, field_settings=None):
+    '''Prints a list of objects.
+
+    @param objs: Objects to print
+    @param fields: Fields on each object to be printed
+    @param formatters: Custom field formatters
+    '''
     formatters = formatters or {}
     field_settings = field_settings or {}
     pt = prettytable.PrettyTable([f for f in fields], caching=False)
@@ -196,9 +202,34 @@ def print_list(objs, fields, formatters=None, field_settings=None):
                 field_name = field.lower().replace(' ', '_')
                 data = getattr(o, field_name, None) or ''
                 row.append(data)
+        count = 0
+        # Converts unicode values in list to string
+        for part in row:
+            count = count + 1
+            if isinstance(part, list):
+                part = unicode_key_value_to_string(part)
+                row[count - 1] = part
         pt.add_row(row)
 
     print(encodeutils.safe_decode(pt.get_string()))
+
+
+def _encode(src):
+    """remove extra 'u' in PY2."""
+    if six.PY2 and isinstance(src, unicode):
+        return src.encode('utf-8')
+    return src
+
+
+def unicode_key_value_to_string(src):
+    """Recursively converts dictionary keys to strings."""
+    if isinstance(src, dict):
+        return dict((_encode(k),
+                    _encode(unicode_key_value_to_string(v)))
+                    for k, v in src.items())
+    if isinstance(src, list):
+        return [unicode_key_value_to_string(l) for l in src]
+    return _encode(src)
 
 
 def print_dict(d, max_column_width=80):
@@ -380,7 +411,7 @@ def strip_version(endpoint):
     (scheme, netloc, path, __, __, __) = url_parts
     path = path.lstrip('/')
     # regex to match 'v1' or 'v2.0' etc
-    if re.match('v\d+\.?\d*', path):
+    if re.match(r'v\d+\.?\d*', path):
         version = float(path.lstrip('v'))
         endpoint = scheme + '://' + netloc
     return endpoint, version
@@ -390,6 +421,8 @@ def print_image(image_obj, human_readable=False, max_col_width=None):
     ignore = ['self', 'access', 'file', 'schema']
     image = dict([item for item in image_obj.items()
                   if item[0] not in ignore])
+    if 'virtual_size' in image:
+        image['virtual_size'] = image.get('virtual_size') or 'Not available'
     if human_readable:
         image['size'] = make_size_human_readable(image['size'])
     if str(max_col_width).isdigit():
@@ -414,6 +447,26 @@ def integrity_iter(iter, checksum):
         raise IOError(errno.EPIPE,
                       'Corrupt image download. Checksum was %s expected %s' %
                       (md5sum, checksum))
+
+
+def serious_integrity_iter(iter, hasher, hash_value):
+    """Check image data integrity using the Glance "multihash".
+
+    :param iter: iterable containing the image data
+    :param hasher: a hashlib object
+    :param hash_value: hexdigest of the image data
+    :raises: IOError if the hashdigest of the data is not hash_value
+    """
+    for chunk in iter:
+        yield chunk
+        if isinstance(chunk, six.string_types):
+            chunk = six.b(chunk)
+        hasher.update(chunk)
+    computed = hasher.hexdigest()
+    if computed != hash_value:
+        raise IOError(errno.EPIPE,
+                      'Corrupt image download. Hash was %s expected %s' %
+                      (computed, hash_value))
 
 
 def memoized_property(fn):

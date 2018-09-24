@@ -13,7 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-_doc_url = "http://docs.openstack.org/user-guide/common/cli-manage-images.html"  # noqa
+_doc_url = "https://docs.openstack.org/python-glanceclient/latest/cli/property-keys.html"  # noqa
 # NOTE(flaper87): Keep a copy of the current default schema so that
 # we can react on cases where there's no connection to an OpenStack
 # deployment. See #1481729
@@ -129,7 +129,8 @@ _BASE_SCHEMA = {
         },
         "status": {
             "readOnly": True,
-            "enum": ["queued", "saving", "active", "killed", "deleted",
+            "enum": ["queued", "saving", "active", "killed",
+                     "deleted", "uploading", "importing",
                      "pending_delete", "deactivated"],
             "type": "string",
             "description": "Status of the image"
@@ -190,6 +191,19 @@ _BASE_SCHEMA = {
             "description": "md5 hash of image contents.",
             "maxLength": 32
         },
+        "os_hash_algo": {
+            "readOnly": True,
+            "type": ["null", "string"],
+            "description": "Algorithm to calculate os_hash_value",
+            "maxLength": 32
+        },
+        "os_hash_value": {
+            "readOnly": True,
+            "type": ["null", "string"],
+            "description": "Hexdigest of the image contents using the "
+                           "algorithm specified by the os_hash_algo",
+            "maxLength": 32
+        },
         "created_at": {
             "readOnly": True,
             "type": "string",
@@ -198,6 +212,11 @@ _BASE_SCHEMA = {
         "protected": {
             "type": "boolean",
             "description": "If true, image will not be deletable."
+        },
+        "os_hidden": {
+            "type": "boolean",
+            "description": "If true, image will not appear in default "
+                           "image list response."
         },
         "architecture": {
             "type": "string",

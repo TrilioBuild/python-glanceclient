@@ -6,6 +6,8 @@ glanceclient Release Notes
    :maxdepth: 1
 
    unreleased
+   rocky
+   queens
    pike
    ocata
    newton
